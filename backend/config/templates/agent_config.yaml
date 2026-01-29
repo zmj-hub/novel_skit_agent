@@ -1,0 +1,98 @@
+# 智能体配置文件模板
+# 此文件用于配置多智能体协作系统中的各个智能体
+
+# 协调智能体配置
+coordination:
+  model: "Qwen/Qwen3-235B-A22B-Instruct-2507"
+  parameters:
+    temperature: 0.6
+    top_p: 0.95
+    max_tokens: 4096
+    frequency_penalty: 0.0
+    presence_penalty: 0.0
+  capabilities:
+    - "task_distribution"
+    - "process_control"
+    - "cross_agent_communication"
+  max_instances: 1
+  timeout: 300
+
+# 创意策划智能体配置
+creative:
+  model: "deepseek-chat"
+  parameters:
+    temperature: 0.8
+    top_p: 0.9
+    max_tokens: 2048
+    frequency_penalty: 0.0
+    presence_penalty: 0.0
+  capabilities:
+    - "creative_generation"
+    - "scenario_design"
+    - "concept_development"
+  max_instances: 2
+  timeout: 300
+
+# 剧本创作智能体配置
+story_script:
+  model: "Qwen/Qwen3-30B-A3B-Instruct-2507"
+  parameters:
+    temperature: 0.7
+    top_p: 0.9
+    max_tokens: 3072
+    frequency_penalty: 0.0
+    presence_penalty: 0.0
+  capabilities:
+    - "script_writing"
+    - "content_optimization"
+    - "story_development"
+  max_instances: 2
+  timeout: 300
+
+# 智能体通信配置
+communication:
+  timeout: 60
+  max_retries: 3
+  retry_delay: 5
+  message_queue_size: 100
+
+# 负载均衡配置
+load_balancing:
+  enabled: true
+  strategy: "round_robin"  # round_robin, least_busy, random
+  max_queue_size: 100
+  task_timeout: 300
+
+# 监控配置
+monitoring:
+  enabled: true
+  metrics_interval: 30  # 秒
+  log_level: "info"
+  log_file: "logs/agent_monitoring.log"
+
+# 模型版本管理
+model_versions:
+  coordination:
+    current: "Qwen/Qwen3-235B-A22B-Instruct-2507"
+    versions:
+      - "Qwen/Qwen3-235B-A22B-Instruct-2507"
+      - "Qwen/Qwen3-72B-A3B-Instruct"
+  creative:
+    current: "deepseek-chat"
+    versions:
+      - "deepseek-chat"
+      - "deepseek-coder"
+  story_script:
+    current: "Qwen/Qwen3-30B-A3B-Instruct-2507"
+    versions:
+      - "Qwen/Qwen3-30B-A3B-Instruct-2507"
+      - "Qwen/Qwen3-72B-A3B-Instruct"
+
+# 工作流配置
+workflow:
+  default_steps:
+    - "创意生成"
+    - "故事创作"
+    - "剧本编写"
+  timeout: 1800  # 总工作流超时时间（秒）
+  max_retries: 3
