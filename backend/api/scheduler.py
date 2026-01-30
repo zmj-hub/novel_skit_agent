@@ -11,10 +11,12 @@ async def create_schedule(request: SchedulerRequest) -> SchedulerResponse:
     """
     协同调度接口
     
-    该接口用于创建工作流调度计划，包括工作时序规划、冲突处理、优先级调度和智能体适配处理。
+    该接口用于创建故事创作工作流调度计划，包括任务规划、拆解、智能体分配、进度跟踪和结果汇总。
     
     Args:
         request: 调度请求参数
+            - story_description: str, 必填, 故事详细描述文本
+            - story_type: str, 必填, 故事类型
             - request_priority: int, 必填, 请求优先级
             - session_id: str, 必填, 会话ID
             - model: str, 必填, 选择的模型名称
@@ -29,8 +31,8 @@ async def create_schedule(request: SchedulerRequest) -> SchedulerResponse:
             - processed_at: str, 处理时间
     
     典型调用场景:
-        - 场景1: 为高优先级任务创建调度计划
-        - 场景2: 为多智能体协作创建调度计划
+        - 场景1: 为故事创作任务创建完整的智能体协作计划
+        - 场景2: 为不同类型的故事（科幻、悬疑、爱情等）分配相应的创作智能体
     
     与其他接口的关联关系:
         - 前置依赖接口: 无
@@ -44,6 +46,8 @@ async def create_schedule(request: SchedulerRequest) -> SchedulerResponse:
     try:
         # 构建工作流输入
         workflow_input = {
+            "story_description": request.story_description,
+            "story_type": request.story_type,
             "request_priority": request.request_priority,
             "session_id": request.session_id,
             "model": request.model

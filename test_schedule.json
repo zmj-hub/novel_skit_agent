@@ -1,0 +1,7 @@
+{
+  "story_description": "测试故事",
+  "story_type": "科幻",
+  "request_priority": 3,
+  "session_id": "test123",
+  "model": "deepseek-chat"
+}

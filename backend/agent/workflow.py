@@ -372,6 +372,8 @@ novel_workflow = create_novel_workflow()
 
 
 class SchedulerAgentState:
+    story_description: str
+    story_type: str
     request_priority: int
     session_id: str
     model: Optional[str] = None
@@ -380,6 +382,11 @@ class SchedulerAgentState:
     conflict_resolution: Optional[Dict[str, Any]] = None
     resource_allocations: Optional[Dict[str, Any]] = None
     adapted_workflow: Optional[Dict[str, Any]] = None
+    task_plan: Optional[Dict[str, Any]] = None
+    task_breakdown: Optional[Dict[str, Any]] = None
+    agent_allocation: Optional[Dict[str, Any]] = None
+    progress_tracking: Optional[Dict[str, Any]] = None
+    result_summary: Optional[Dict[str, Any]] = None
     scheduling_log: Optional[Dict[str, Any]] = None
     exception_report: Optional[Dict[str, Any]] = None
     response: Optional[str] = None
@@ -493,6 +500,11 @@ async def generate_reports_node(state: Dict[str, Any]) -> Dict[str, Any]:
     conflict_resolution = state.get('conflict_resolution')
     resource_allocations = state.get('resource_allocations')
     adapted_workflow = state.get('adapted_workflow')
+    task_plan = state.get('task_plan')
+    task_breakdown = state.get('task_breakdown')
+    agent_allocation = state.get('agent_allocation')
+    progress_tracking = state.get('progress_tracking')
+    result_summary = state.get('result_summary')
     model = state.get('model', settings.DEFAULT_MODEL)
     
     print("Generating scheduling logs and exception reports...")
@@ -519,23 +531,163 @@ async def generate_reports_node(state: Dict[str, Any]) -> Dict[str, Any]:
         return result
 
 
+async def task_planning_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    任务规划节点
+    """
+    story_description = state.get('story_description', '')
+    story_type = state.get('story_type', '')
+    model = state.get('model', settings.DEFAULT_MODEL)
+    
+    print(f"Planning task for story: {story_type}")
+    print(f"Story description: {story_description[:100]}...")
+    
+    try:
+        agent = CoordinationSchedulerAgent(model)
+        task_plan = await agent.plan_story_task(story_description, story_type)
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["task_plan"] = task_plan
+        return result
+    except Exception as e:
+        print(f"Warning: Failed to plan story task: {e}")
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["task_plan"] = {"story_type": story_type, "plan": "Error", "estimated_duration": 0}
+        return result
+
+
+async def task_breakdown_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    任务拆解节点
+    """
+    task_plan = state.get('task_plan')
+    model = state.get('model', settings.DEFAULT_MODEL)
+    
+    print("Breaking down task into subtasks...")
+    
+    try:
+        agent = CoordinationSchedulerAgent(model)
+        task_breakdown = await agent.breakdown_task(task_plan)
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["task_breakdown"] = task_breakdown
+        return result
+    except Exception as e:
+        print(f"Warning: Failed to breakdown task: {e}")
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["task_breakdown"] = {"subtasks": [], "breakdown_at": "Error"}
+        return result
+
+
+async def agent_allocation_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    智能体分配节点
+    """
+    task_breakdown = state.get('task_breakdown')
+    model = state.get('model', settings.DEFAULT_MODEL)
+    
+    print("Allocating subtasks to agents...")
+    
+    try:
+        agent = CoordinationSchedulerAgent(model)
+        agent_allocation = await agent.allocate_tasks_to_agents(task_breakdown)
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["agent_allocation"] = agent_allocation
+        return result
+    except Exception as e:
+        print(f"Warning: Failed to allocate tasks to agents: {e}")
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["agent_allocation"] = {"allocations": [], "allocated_at": "Error"}
+        return result
+
+
+async def progress_tracking_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    进度跟踪节点
+    """
+    agent_allocation = state.get('agent_allocation')
+    model = state.get('model', settings.DEFAULT_MODEL)
+    
+    print("Tracking task progress...")
+    
+    try:
+        agent = CoordinationSchedulerAgent(model)
+        progress_tracking = await agent.track_task_progress(agent_allocation)
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["progress_tracking"] = progress_tracking
+        return result
+    except Exception as e:
+        print(f"Warning: Failed to track task progress: {e}")
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["progress_tracking"] = {"progress": 0, "status": "Error", "tracking_at": "Error"}
+        return result
+
+
+async def result_summary_node(state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    结果汇总节点
+    """
+    progress_tracking = state.get('progress_tracking')
+    model = state.get('model', settings.DEFAULT_MODEL)
+    
+    print("Summarizing task results...")
+    
+    try:
+        agent = CoordinationSchedulerAgent(model)
+        result_summary = await agent.summarize_task_results(progress_tracking)
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["result_summary"] = result_summary
+        result["response"] = "Task completed successfully"
+        return result
+    except Exception as e:
+        print(f"Warning: Failed to summarize task results: {e}")
+        # 返回包含原始状态的数据
+        result = state.copy()
+        result["result_summary"] = {"summary": "Error", "completed_at": "Error"}
+        result["response"] = "Error summarizing task results"
+        return result
+
+
 def create_scheduler_workflow():
     """
     创建协同调度工作流
     """
     workflow = StateGraph(dict)
     
+    # 原有节点
     workflow.add_node("create_schedule", create_schedule_node)
     workflow.add_node("detect_conflicts", detect_conflicts_node)
     workflow.add_node("allocate_resources", allocate_resources_node)
+    
+    # 新增节点
+    workflow.add_node("task_planning", task_planning_node)
+    workflow.add_node("task_breakdown", task_breakdown_node)
+    workflow.add_node("agent_allocation", agent_allocation_node)
+    workflow.add_node("progress_tracking", progress_tracking_node)
+    workflow.add_node("result_summary", result_summary_node)
+    
+    # 原有节点
     workflow.add_node("execute_workflow", execute_workflow_node)
     workflow.add_node("generate_reports", generate_reports_node)
     
-    workflow.set_entry_point("create_schedule")
+    # 设置工作流流程
+    workflow.set_entry_point("task_planning")
+    workflow.add_edge("task_planning", "task_breakdown")
+    workflow.add_edge("task_breakdown", "agent_allocation")
+    workflow.add_edge("agent_allocation", "create_schedule")
     workflow.add_edge("create_schedule", "detect_conflicts")
     workflow.add_edge("detect_conflicts", "allocate_resources")
     workflow.add_edge("allocate_resources", "execute_workflow")
-    workflow.add_edge("execute_workflow", "generate_reports")
+    workflow.add_edge("execute_workflow", "progress_tracking")
+    workflow.add_edge("progress_tracking", "result_summary")
+    workflow.add_edge("result_summary", "generate_reports")
     workflow.add_edge("generate_reports", END)
     
     return workflow.compile()

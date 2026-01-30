@@ -351,3 +351,284 @@ class CoordinationSchedulerAgent:
             "exception_report": exception_report,
             "processed_at": datetime.datetime.now().isoformat()
         }
+    
+    async def plan_story_task(self, story_description: str, story_type: str) -> Dict[str, Any]:
+        """
+        故事创作任务规划
+        
+        Args:
+            story_description: 故事详细描述文本
+            story_type: 故事类型
+            
+        Returns:
+            任务规划结果，包含整体设计和预计工作量
+        """
+        start_time = datetime.datetime.now()
+        
+        # 模拟任务规划过程
+        print(f"Planning story task for {story_type} story...")
+        print(f"Story description: {story_description[:100]}...")
+        
+        # 模拟不同故事类型的工作量
+        type_duration_map = {
+            "科幻": 180,  # 分钟
+            "悬疑": 150,
+            "爱情": 120,
+            "奇幻": 160,
+            "历史": 140,
+            "都市": 100,
+            "武侠": 130,
+            "恐怖": 110,
+        }
+        
+        estimated_duration = type_duration_map.get(story_type, 120)
+        
+        # 生成任务规划
+        task_plan = {
+            "story_type": story_type,
+            "story_description": story_description,
+            "plan": f"为{story_type}故事创建完整的创作计划，包括创意构思、情节设计、人物塑造和结局安排",
+            "estimated_duration": estimated_duration,
+            "key_phases": [
+                "创意构思与大纲设计",
+                "人物设定与关系构建",
+                "情节发展与冲突设计",
+                "细节描写与场景渲染",
+                "结局设计与主题升华"
+            ],
+            "created_at": start_time.isoformat()
+        }
+        
+        return task_plan
+    
+    async def breakdown_task(self, task_plan: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        任务拆解
+        
+        Args:
+            task_plan: 任务规划结果
+            
+        Returns:
+            拆解后的子任务列表
+        """
+        start_time = datetime.datetime.now()
+        story_type = task_plan.get("story_type", "未知")
+        
+        print(f"Breaking down task for {story_type} story...")
+        
+        # 基础子任务
+        base_subtasks = [
+            {
+                "subtask_id": "subtask_1",
+                "name": "创意构思与大纲设计",
+                "description": "根据故事类型和描述，设计故事大纲和整体结构",
+                "estimated_duration": 30,
+                "agent_type": "creative",
+                "priority": 1
+            },
+            {
+                "subtask_id": "subtask_2",
+                "name": "人物设定与关系构建",
+                "description": "设计主要人物及其关系网络",
+                "estimated_duration": 25,
+                "agent_type": "creative",
+                "priority": 2
+            },
+            {
+                "subtask_id": "subtask_3",
+                "name": "情节发展与冲突设计",
+                "description": "设计故事的情节发展和主要冲突",
+                "estimated_duration": 40,
+                "agent_type": "creative",
+                "priority": 3
+            },
+            {
+                "subtask_id": "subtask_4",
+                "name": "细节描写与场景渲染",
+                "description": "为故事添加细节描写和场景渲染",
+                "estimated_duration": 35,
+                "agent_type": "script",
+                "priority": 4
+            },
+            {
+                "subtask_id": "subtask_5",
+                "name": "结局设计与主题升华",
+                "description": "设计故事结局并升华主题",
+                "estimated_duration": 30,
+                "agent_type": "script",
+                "priority": 5
+            }
+        ]
+        
+        # 根据故事类型调整子任务
+        if story_type == "科幻":
+            base_subtasks.append({
+                "subtask_id": "subtask_6",
+                "name": "科幻元素设计",
+                "description": "设计科幻故事中的科技元素和世界观",
+                "estimated_duration": 30,
+                "agent_type": "creative",
+                "priority": 2
+            })
+        elif story_type == "悬疑":
+            base_subtasks.append({
+                "subtask_id": "subtask_6",
+                "name": "悬疑元素设计",
+                "description": "设计悬疑故事中的线索和谜题",
+                "estimated_duration": 25,
+                "agent_type": "creative",
+                "priority": 3
+            })
+        elif story_type == "爱情":
+            base_subtasks.append({
+                "subtask_id": "subtask_6",
+                "name": "情感线索设计",
+                "description": "设计爱情故事中的情感发展线索",
+                "estimated_duration": 20,
+                "agent_type": "script",
+                "priority": 3
+            })
+        
+        task_breakdown = {
+            "subtasks": base_subtasks,
+            "total_subtasks": len(base_subtasks),
+            "total_estimated_duration": sum(st["estimated_duration"] for st in base_subtasks),
+            "breakdown_at": start_time.isoformat()
+        }
+        
+        return task_breakdown
+    
+    async def allocate_tasks_to_agents(self, task_breakdown: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        子任务分配给智能体
+        
+        Args:
+            task_breakdown: 拆解后的子任务列表
+            
+        Returns:
+            智能体分配结果
+        """
+        start_time = datetime.datetime.now()
+        allocations = []
+        
+        print("Allocating subtasks to agents...")
+        
+        for subtask in task_breakdown.get("subtasks", []):
+            # 分配智能体
+            agent_type = subtask.get("agent_type", "creative")
+            agent_name = "创意智能体" if agent_type == "creative" else "剧本智能体"
+            
+            allocation = {
+                "subtask_id": subtask["subtask_id"],
+                "subtask_name": subtask["name"],
+                "agent_type": agent_type,
+                "agent_name": agent_name,
+                "estimated_duration": subtask["estimated_duration"],
+                "priority": subtask["priority"],
+                "allocated_at": start_time.isoformat()
+            }
+            
+            allocations.append(allocation)
+        
+        # 统计分配情况
+        creative_count = sum(1 for a in allocations if a["agent_type"] == "creative")
+        script_count = sum(1 for a in allocations if a["agent_type"] == "script")
+        
+        agent_allocation = {
+            "allocations": allocations,
+            "allocated_at": start_time.isoformat(),
+            "statistics": {
+                "total_tasks": len(allocations),
+                "creative_agent_tasks": creative_count,
+                "script_agent_tasks": script_count
+            }
+        }
+        
+        return agent_allocation
+    
+    async def track_task_progress(self, agent_allocation: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        任务进度跟踪
+        
+        Args:
+            agent_allocation: 智能体分配结果
+            
+        Returns:
+            进度跟踪结果
+        """
+        start_time = datetime.datetime.now()
+        
+        print("Tracking task progress...")
+        
+        # 模拟进度跟踪
+        progress_updates = []
+        total_tasks = len(agent_allocation.get("allocations", []))
+        
+        for i, allocation in enumerate(agent_allocation.get("allocations", [])):
+            # 模拟任务完成情况
+            is_completed = i < total_tasks * 0.7  # 模拟70%的任务已完成
+            progress = 100 if is_completed else 50
+            
+            progress_update = {
+                "subtask_id": allocation["subtask_id"],
+                "subtask_name": allocation["subtask_name"],
+                "agent_name": allocation["agent_name"],
+                "progress": progress,
+                "status": "completed" if is_completed else "in_progress",
+                "updated_at": start_time.isoformat()
+            }
+            
+            progress_updates.append(progress_update)
+        
+        # 计算整体进度
+        overall_progress = sum(p["progress"] for p in progress_updates) / len(progress_updates) if progress_updates else 0
+        
+        progress_tracking = {
+            "progress_updates": progress_updates,
+            "overall_progress": overall_progress,
+            "status": "in_progress" if overall_progress < 100 else "completed",
+            "tracking_at": start_time.isoformat(),
+            "completed_tasks": sum(1 for p in progress_updates if p["status"] == "completed"),
+            "total_tasks": len(progress_updates)
+        }
+        
+        return progress_tracking
+    
+    async def summarize_task_results(self, progress_tracking: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        任务结果汇总
+        
+        Args:
+            progress_tracking: 进度跟踪结果
+            
+        Returns:
+            结果汇总
+        """
+        start_time = datetime.datetime.now()
+        overall_progress = progress_tracking.get("overall_progress", 0)
+        
+        print(f"Summarizing task results with progress: {overall_progress:.1f}%")
+        
+        # 生成结果汇总
+        result_summary = {
+            "overall_progress": overall_progress,
+            "status": "completed" if overall_progress >= 100 else "in_progress",
+            "completed_tasks": progress_tracking.get("completed_tasks", 0),
+            "total_tasks": progress_tracking.get("total_tasks", 0),
+            "summary": f"任务已完成{overall_progress:.1f}%，共完成{progress_tracking.get('completed_tasks', 0)}个任务，总计{progress_tracking.get('total_tasks', 0)}个任务",
+            "key_achievements": [
+                "完成故事大纲设计",
+                "构建主要人物关系",
+                "设计核心情节冲突",
+                "渲染关键场景细节"
+            ],
+            "next_steps": [
+                "完成剩余任务",
+                "整合所有内容",
+                "进行质量评估",
+                "提交最终结果"
+            ],
+            "completed_at": start_time.isoformat() if overall_progress >= 100 else None
+        }
+        
+        return result_summary

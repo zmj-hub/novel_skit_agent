@@ -37,7 +37,7 @@ app.include_router(creative_router, prefix="/api/creative", tags=["creative"])
 app.include_router(example_router, prefix="/api/example", tags=["example"])
 app.include_router(knowledge_router, prefix="/api/knowledge", tags=["knowledge"])
 app.include_router(novel_router, prefix="/api/novel", tags=["novel"])
-app.include_router(scheduler_router, prefix="/api/scheduler", tags=["scheduler"])
+app.include_router(scheduler_router, prefix="/api", tags=["scheduler"])
 app.include_router(upload_router, prefix="/api/upload", tags=["upload"])
 
 # 根路径

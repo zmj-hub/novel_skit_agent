@@ -189,11 +189,15 @@ class SchedulerRequest(BaseModel):
     """
     调度请求模型
     """
+    story_description: str = Field(..., description="故事详细描述文本", 
+                                 example="一个关于人工智能与人类情感的科幻故事，讲述了一个AI助手与它的主人之间逐渐发展的情感纽带，以及他们共同面对的挑战")
+    story_type: str = Field(..., description="故事类型", 
+                          example="科幻")
     request_priority: int = Field(default=1, description="请求优先级（1-5，5最高）", 
                                 example=3)
     session_id: str = Field(..., description="对话会话 ID", example="user_123")
-    model: str = Field(default="deepseek-chat", description="使用的模型", 
-                      example="deepseek-chat")
+    model: str = Field(default="modelscope", description="使用的模型", 
+                      example="modelscope")
 
 
 class WorkflowStep(BaseModel):
