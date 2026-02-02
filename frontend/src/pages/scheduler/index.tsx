@@ -12,10 +12,11 @@ import {
   BarChartOutlined,
   UserOutlined,
   SyncOutlined,
-  WebSocketOutlined
+  CloudOutlined
 } from '@ant-design/icons';
 import Layout from '../../components/layout/Layout';
 import Loading from '../../components/common/Loading';
+import { WebSocketProgress } from '../../components/progress';
 import api from '../../services/api';
 import endpoints from '../../services/endpoints';
 
@@ -789,6 +790,24 @@ const Scheduler: React.FC = () => {
         {/* 调度结果 */}
         {showResult && schedulerResult && (
           <>
+            {/* 实时进度显示 */}
+            <Card
+              title={
+                <Space>
+                  <CloudOutlined />
+                  <span>实时任务进度</span>
+                </Space>
+              }
+              variant="borderless"
+              className="shadow-md rounded-lg overflow-hidden"
+              style={{ 
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(249,250,251,0.95) 100%)',
+                boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
+              }}
+            >
+              <WebSocketProgress sessionId={schedulerResult.session_id} />
+            </Card>
+
             {/* 总体状态 */}
             <Card
               title={

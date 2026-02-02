@@ -3,6 +3,8 @@ from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocket, WebSocketDisconnect
 from models.schemas import SchedulerRequest, SchedulerResponse, WorkflowSchedule, WorkflowLog, ExceptionReport
 from agent.workflow import scheduler_workflow
+from agent.storage import storage
+from agent.anomaly import anomaly_monitor
 from typing import Optional, Dict, Any, Set
 import logging
 import time
@@ -362,6 +364,83 @@ async def get_all_progress():
     return session_progress_store
 
 
+@router.get("/tasks")
+async def get_all_tasks():
+    """
+    获取所有任务
+    
+    Returns:
+        List: 任务列表
+    """
+    tasks = storage.list_all()
+    return [task.to_dict() for task in tasks]
+
+
+@router.get("/tasks/{task_id}")
+async def get_task(task_id: str):
+    """
+    获取任务详情
+    
+    Args:
+        task_id: 任务ID
+        
+    Returns:
+        Dict: 任务详情
+    """
+    task = storage.get(task_id)
+    if task:
+        return task.to_dict()
+    else:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+
+@router.get("/tasks/session/{session_id}")
+async def get_tasks_by_session(session_id: str):
+    """
+    获取会话的所有任务
+    
+    Args:
+        session_id: 会话ID
+        
+    Returns:
+        List: 任务列表
+    """
+    tasks = storage.get_by_session(session_id)
+    return [task.to_dict() for task in tasks]
+
+
+@router.post("/tasks/{task_id}/progress")
+async def update_task_progress(task_id: str, progress_data: Dict[str, Any]):
+    """
+    更新任务进度
+    
+    Args:
+        task_id: 任务ID
+        progress_data: 进度数据
+        
+    Returns:
+        Dict: 更新后的任务进度
+    """
+    task = storage.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    step_id = progress_data.get("step_id")
+    progress = progress_data.get("progress")
+    status = progress_data.get("status", "running")
+    
+    if step_id and progress is not None:
+        task.update_step_progress(step_id, progress, status)
+        storage.save(task)
+        
+        # 监控异常
+        anomaly_monitor.monitor_task(task_id)
+        
+        return task.to_dict()
+    else:
+        raise HTTPException(status_code=400, detail="缺少必要的参数: step_id 和 progress")
+
+
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """
@@ -383,8 +462,78 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             # 可以根据需要处理客户端发送的消息
             if data == "ping":
                 await manager.send_personal_message({"type": "pong"}, websocket)
+            elif data.startswith("get_tasks"):
+                # 获取会话的所有任务
+                tasks = storage.get_by_session(session_id)
+                await manager.send_personal_message({
+                    "type": "tasks",
+                    "tasks": [task.to_dict() for task in tasks]
+                }, websocket)
+            elif data.startswith("get_task:"):
+                # 获取特定任务
+                task_id = data.split(":")[1]
+                task = storage.get(task_id)
+                if task:
+                    await manager.send_personal_message({
+                        "type": "task",
+                        "task": task.to_dict()
+                    }, websocket)
+                else:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": "任务不存在"
+                    }, websocket)
     except WebSocketDisconnect:
         manager.disconnect(websocket, session_id)
     except Exception as e:
         logger.error(f"WebSocket错误: {str(e)}")
         manager.disconnect(websocket, session_id)
+
+
+@router.websocket("/ws/task/{task_id}")
+async def task_websocket_endpoint(websocket: WebSocket, task_id: str):
+    """
+    WebSocket端点，用于实时推送特定任务的进度更新
+    
+    Args:
+        websocket: WebSocket连接对象
+        task_id: 任务ID
+    """
+    await manager.connect(websocket, task_id)
+    
+    try:
+        # 发送当前任务状态
+        task = storage.get(task_id)
+        if task:
+            await manager.send_personal_message({
+                "type": "task_status",
+                "task": task.to_dict()
+            }, websocket)
+        
+        # 持续监听消息
+        while True:
+            # 接收消息
+            data = await websocket.receive_text()
+            logger.info(f"收到任务WebSocket消息: task_id={task_id}, data={data}")
+            
+            # 处理消息
+            if data == "ping":
+                await manager.send_personal_message({"type": "pong"}, websocket)
+            elif data == "get_status":
+                # 获取任务状态
+                task = storage.get(task_id)
+                if task:
+                    await manager.send_personal_message({
+                        "type": "task_status",
+                        "task": task.to_dict()
+                    }, websocket)
+                else:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": "任务不存在"
+                    }, websocket)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket, task_id)
+    except Exception as e:
+        logger.error(f"任务WebSocket错误: {str(e)}")
+        manager.disconnect(websocket, task_id)

@@ -472,22 +472,425 @@ async def allocate_resources_node(state: Dict[str, Any]) -> Dict[str, Any]:
         return result
 
 
+import logging
+from typing import Dict, Any, List, Optional, Tuple
+from datetime import datetime, timedelta
+import asyncio
+import uuid
+from .models import TaskProgress, Anomaly
+from .storage import storage
+
+# 配置日志
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# 工作流状态定义
+WORKFLOW_STATES = {
+    "INITIALIZED": "initialized",
+    "RUNNING": "running",
+    "SUCCESS": "success",
+    "FAILED": "failed",
+    "PAUSED": "paused"
+}
+
+# 可重试的错误类型
+RETRYABLE_ERRORS = [
+    "NetworkError",
+    "TimeoutError",
+    "ResourceUnavailableError",
+    "TemporaryError"
+]
+
+
+async def validate_workflow(adapted_workflow: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """
+    验证工作流结构
+    
+    Args:
+        adapted_workflow: 适配后的工作流
+        
+    Returns:
+        Tuple[bool, Optional[str]]: (是否有效, 错误信息)
+    """
+    if not adapted_workflow:
+        return False, "工作流不能为空"
+    
+    if "adapted_workflow" not in adapted_workflow:
+        return False, "工作流缺少步骤定义"
+    
+    steps = adapted_workflow["adapted_workflow"]
+    if not isinstance(steps, list):
+        return False, "工作流步骤必须是列表"
+    
+    if len(steps) == 0:
+        return False, "工作流步骤不能为空"
+    
+    return True, None
+
+
+async def execute_workflow_step(
+    step: Dict[str, Any], 
+    state: Dict[str, Any], 
+    step_index: int,
+    total_steps: int
+) -> Dict[str, Any]:
+    """
+    执行单个工作流步骤
+    
+    Args:
+        step: 工作流步骤
+        state: 当前状态
+        step_index: 步骤索引
+        total_steps: 总步骤数
+        
+    Returns:
+        Dict[str, Any]: 执行结果
+    """
+    step_name = step.get("name", f"step_{step_index}")
+    step_type = step.get("type", "generic")
+    step_params = step.get("params", {})
+    
+    logger.info(f"开始执行步骤 {step_index + 1}/{total_steps}: {step_name} (类型: {step_type})")
+    
+    # 记录步骤开始时间
+    start_time = datetime.now()
+    
+    try:
+        # 根据步骤类型执行不同的逻辑
+        if step_type == "creative_planning":
+            # 执行创意策划步骤
+            from agent.creative_agent import CreativePlanningAgent
+            model = state.get("model", settings.DEFAULT_MODEL)
+            agent = CreativePlanningAgent(model)
+            
+            # 执行创意策划逻辑
+            result = await agent.analyze_hotspots(step_params.get("hotspots", []))
+            logger.info(f"创意策划步骤执行完成: {step_name}")
+            
+        elif step_type == "novel_writing":
+            # 执行小说创作步骤
+            from agent.novel_agent import NovelWritingAgent
+            model = state.get("model", settings.DEFAULT_MODEL)
+            agent = NovelWritingAgent(model)
+            
+            # 执行小说创作逻辑
+            result = await agent.write_chapter(
+                step_params.get("chapter_outline", ""),
+                step_params.get("style", "urban"),
+                step_params.get("chapter_number", step_index + 1)
+            )
+            logger.info(f"小说创作步骤执行完成: {step_name}")
+            
+        elif step_type == "quality_evaluation":
+            # 执行质量评估步骤
+            from agent.novel_agent import NovelWritingAgent
+            model = state.get("model", settings.DEFAULT_MODEL)
+            agent = NovelWritingAgent(model)
+            
+            # 执行质量评估逻辑
+            content = step_params.get("content", state.get("full_novel", ""))
+            result = await agent.evaluate_content_quality(content)
+            logger.info(f"质量评估步骤执行完成: {step_name}")
+            
+        else:
+            # 通用步骤执行逻辑
+            logger.info(f"执行通用步骤: {step_name}")
+            result = {"step_name": step_name, "status": "completed", "result": "Step executed successfully"}
+        
+        # 记录步骤结束时间
+        end_time = datetime.now()
+        execution_time = (end_time - start_time).total_seconds()
+        
+        logger.info(f"步骤 {step_name} 执行完成，耗时: {execution_time:.2f}秒")
+        
+        return {
+            "step_name": step_name,
+            "step_type": step_type,
+            "status": "completed",
+            "result": result,
+            "execution_time": execution_time,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat()
+        }
+        
+    except Exception as e:
+        # 记录步骤执行错误
+        end_time = datetime.now()
+        execution_time = (end_time - start_time).total_seconds()
+        
+        error_message = str(e)
+        logger.error(f"步骤 {step_name} 执行失败: {error_message}")
+        
+        return {
+            "step_name": step_name,
+            "step_type": step_type,
+            "status": "failed",
+            "error": error_message,
+            "execution_time": execution_time,
+            "start_time": start_time.isoformat(),
+            "end_time": end_time.isoformat()
+        }
+
+
+async def retry_workflow_step(
+    step: Dict[str, Any], 
+    state: Dict[str, Any], 
+    step_index: int,
+    total_steps: int,
+    max_retries: int = 3
+) -> Dict[str, Any]:
+    """
+    重试执行工作流步骤
+    
+    Args:
+        step: 工作流步骤
+        state: 当前状态
+        step_index: 步骤索引
+        total_steps: 总步骤数
+        max_retries: 最大重试次数
+        
+    Returns:
+        Dict[str, Any]: 执行结果
+    """
+    retries = 0
+    last_error = None
+    
+    while retries < max_retries:
+        try:
+            result = await execute_workflow_step(step, state, step_index, total_steps)
+            if result["status"] == "completed":
+                logger.info(f"步骤执行成功（重试 {retries} 次）")
+                return result
+            
+            # 检查是否是可重试的错误
+            error_message = result.get("error", "")
+            is_retryable = any(error_type in error_message for error_type in RETRYABLE_ERRORS)
+            
+            if not is_retryable:
+                logger.info("遇到不可重试的错误，停止重试")
+                return result
+            
+            retries += 1
+            last_error = error_message
+            
+            # 指数退避
+            backoff_time = min(2 ** retries, 30)  # 最大退避时间30秒
+            logger.info(f"步骤执行失败，{backoff_time}秒后重试 ({retries}/{max_retries})")
+            await asyncio.sleep(backoff_time)
+            
+        except Exception as e:
+            retries += 1
+            last_error = str(e)
+            
+            # 指数退避
+            backoff_time = min(2 ** retries, 30)
+            logger.error(f"步骤执行异常，{backoff_time}秒后重试 ({retries}/{max_retries}): {last_error}")
+            await asyncio.sleep(backoff_time)
+    
+    # 重试次数耗尽
+    logger.error(f"步骤执行失败，已达到最大重试次数 ({max_retries})")
+    return {
+        "step_name": step.get("name", f"step_{step_index}"),
+        "step_type": step.get("type", "generic"),
+        "status": "failed",
+        "error": last_error or "未知错误",
+        "retries": retries,
+        "max_retries": max_retries
+    }
+
+
 async def execute_workflow_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     执行工作流节点
+    
+    实现完整的工作流执行逻辑，包括状态管理、步骤执行控制、错误处理和重试机制
     """
+    # 获取工作流配置
     adapted_workflow = state.get('adapted_workflow')
     model = state.get('model', settings.DEFAULT_MODEL)
+    session_id = state.get('session_id', '')
     
-    print("Executing workflow steps...")
-    print(f"Adapted workflow: {adapted_workflow}")
-    
-    # 这里可以添加实际执行工作流的逻辑
-    # 例如，调用创意生成和小说创作智能体
-    
-    # 返回包含原始状态的数据
+    # 初始化结果
     result = state.copy()
-    result["response"] = "Workflow execution initiated"
+    
+    # 验证工作流
+    is_valid, error_msg = await validate_workflow(adapted_workflow)
+    if not is_valid:
+        logger.error(f"工作流验证失败: {error_msg}")
+        result["workflow_status"] = WORKFLOW_STATES["FAILED"]
+        result["workflow_error"] = error_msg
+        result["response"] = f"工作流执行失败: {error_msg}"
+        return result
+    
+    # 初始化工作流状态
+    workflow_steps = adapted_workflow.get("adapted_workflow", [])
+    total_steps = len(workflow_steps)
+    
+    # 记录工作流开始时间
+    start_time = datetime.now()
+    
+    # 创建任务进度对象
+    task_id = f"task_{uuid.uuid4()}"
+    story_type = state.get('story_type', '都市')
+    task_progress = TaskProgress(task_id, session_id, story_type)
+    
+    # 为每个工作流步骤添加到任务进度中
+    step_map = {}
+    for step in workflow_steps:
+        step_name = step.get("name", f"step_{len(task_progress.step_progress)}")
+        step_obj = task_progress.add_step(step_name)
+        step_map[step_name] = step_obj.step_id
+    
+    # 更新工作流状态为运行中
+    result["workflow_status"] = WORKFLOW_STATES["RUNNING"]
+    result["workflow_start_time"] = start_time.isoformat()
+    result["workflow_progress"] = 0
+    result["workflow_steps"] = []
+    result["workflow_execution_logs"] = []
+    result["task_id"] = task_id
+    
+    logger.info(f"开始执行工作流，共 {total_steps} 个步骤")
+    
+    try:
+        # 顺序执行每个步骤
+        for i, step in enumerate(workflow_steps):
+            step_name = step.get("name", f"step_{i}")
+            step_id = step_map.get(step_name)
+            
+            # 更新当前步骤状态为运行中
+            if step_id:
+                task_progress.update_step_progress(step_id, 0, "running")
+                storage.save(task_progress)
+            
+            # 计算当前进度
+            progress = int((i / total_steps) * 100)
+            result["workflow_progress"] = progress
+            
+            # 执行步骤
+            step_result = await retry_workflow_step(step, result, i, total_steps)
+            
+            # 记录步骤结果
+            result["workflow_steps"].append(step_result)
+            
+            # 检查步骤执行状态
+            if step_result["status"] == "failed":
+                # 步骤执行失败
+                error_message = step_result.get('error', '未知错误')
+                logger.error(f"步骤 {i + 1}/{total_steps} 执行失败: {error_message}")
+                
+                # 更新步骤状态为失败
+                if step_id:
+                    task_progress.update_step_progress(step_id, 0, "failed")
+                    # 添加异常记录
+                    anomaly = Anomaly("error", "high", f"步骤 {step_name} 执行失败: {error_message}")
+                    task_progress.add_anomaly(anomaly)
+                    storage.save(task_progress)
+                
+                result["workflow_status"] = WORKFLOW_STATES["FAILED"]
+                result["workflow_error"] = error_message
+                result["workflow_progress"] = int(((i + 1) / total_steps) * 100)
+                break
+            else:
+                # 步骤执行成功
+                if step_id:
+                    task_progress.update_step_progress(step_id, 100, "completed")
+                    storage.save(task_progress)
+            
+            # 将步骤结果合并到状态中
+            if "result" in step_result:
+                # 根据步骤类型合并不同的结果
+                step_type = step.get("type", "generic")
+                if step_type == "creative_planning":
+                    result["creative_output"] = step_result["result"]
+                elif step_type == "novel_writing":
+                    result["chapter_output"] = step_result["result"]
+                elif step_type == "quality_evaluation":
+                    result["quality_evaluation"] = step_result["result"]
+            
+            # 记录执行日志
+            log_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "level": "INFO",
+                "message": f"步骤 {i + 1}/{total_steps} 执行完成: {step_result['status']}",
+                "step_name": step_result.get("step_name", f"step_{i}"),
+                "step_status": step_result["status"]
+            }
+            result["workflow_execution_logs"].append(log_entry)
+        
+        # 计算工作流结束时间
+        end_time = datetime.now()
+        execution_time = (end_time - start_time).total_seconds()
+        
+        # 更新工作流状态
+        if result["workflow_status"] == WORKFLOW_STATES["RUNNING"]:
+            # 所有步骤执行完成
+            result["workflow_status"] = WORKFLOW_STATES["SUCCESS"]
+            result["workflow_progress"] = 100
+            result["response"] = "工作流执行成功"
+            logger.info(f"工作流执行成功，共耗时: {execution_time:.2f}秒")
+            
+            # 更新任务进度为完成
+            task_progress.status = "completed"
+            task_progress.end_time = end_time.isoformat()
+            task_progress.progress = 100
+        else:
+            # 工作流执行失败
+            logger.error(f"工作流执行失败，共耗时: {execution_time:.2f}秒")
+            
+            # 更新任务进度为失败
+            task_progress.status = "failed"
+            task_progress.end_time = end_time.isoformat()
+        
+        # 更新工作流执行信息
+        result["workflow_end_time"] = end_time.isoformat()
+        result["workflow_execution_time"] = execution_time
+        result["workflow_total_steps"] = total_steps
+        result["workflow_completed_steps"] = len([s for s in result["workflow_steps"] if s["status"] == "completed"])
+        
+        # 保存任务进度
+        storage.save(task_progress)
+        
+        # 添加任务进度到结果中
+        result["task_progress"] = task_progress.to_dict()
+        
+    except Exception as e:
+        # 捕获工作流执行过程中的异常
+        error_message = str(e)
+        end_time = datetime.now()
+        execution_time = (end_time - start_time).total_seconds()
+        
+        logger.error(f"工作流执行过程中发生异常: {error_message}")
+        
+        # 更新工作流状态为失败
+        result["workflow_status"] = WORKFLOW_STATES["FAILED"]
+        result["workflow_error"] = error_message
+        result["workflow_end_time"] = end_time.isoformat()
+        result["workflow_execution_time"] = execution_time
+        result["response"] = f"工作流执行失败: {error_message}"
+        
+        # 更新任务进度为失败
+        task_progress.status = "failed"
+        task_progress.end_time = end_time.isoformat()
+        # 添加异常记录
+        anomaly = Anomaly("error", "high", f"工作流执行异常: {error_message}")
+        task_progress.add_anomaly(anomaly)
+        storage.save(task_progress)
+        
+        # 记录错误日志
+        log_entry = {
+            "timestamp": end_time.isoformat(),
+            "level": "ERROR",
+            "message": f"工作流执行异常: {error_message}",
+            "error": error_message
+        }
+        result["workflow_execution_logs"].append(log_entry)
+        
+        # 添加任务进度到结果中
+        result["task_progress"] = task_progress.to_dict()
+    
+    # 记录最终状态
+    logger.info(f"工作流执行结束，状态: {result['workflow_status']}")
+    
     return result
 
 

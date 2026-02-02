@@ -4,6 +4,9 @@ from typing import Dict, List, Any, Optional
 import asyncio
 import datetime
 import time
+import uuid
+from .models import TaskProgress, StepProgress, Anomaly
+from .storage import storage
 
 
 class CoordinationSchedulerAgent:
@@ -546,12 +549,14 @@ class CoordinationSchedulerAgent:
         
         return agent_allocation
     
-    async def track_task_progress(self, agent_allocation: Dict[str, Any]) -> Dict[str, Any]:
+    async def track_task_progress(self, agent_allocation: Dict[str, Any], story_type: str = "都市", session_id: str = None) -> Dict[str, Any]:
         """
         任务进度跟踪
         
         Args:
             agent_allocation: 智能体分配结果
+            story_type: 故事类型
+            session_id: 会话ID
             
         Returns:
             进度跟踪结果
@@ -560,39 +565,175 @@ class CoordinationSchedulerAgent:
         
         print("Tracking task progress...")
         
+        # 生成任务ID
+        task_id = f"task_{uuid.uuid4()}"
+        
+        # 创建会话ID（如果未提供）
+        if session_id is None:
+            session_id = f"session_{uuid.uuid4()}"
+        
+        # 创建TaskProgress对象
+        task_progress = TaskProgress(task_id, session_id, story_type)
+        
+        # 为每个子任务添加步骤
+        allocations = agent_allocation.get("allocations", [])
+        step_map = {}
+        
+        for allocation in allocations:
+            step = task_progress.add_step(allocation["subtask_name"], allocation["agent_name"])
+            step_map[allocation["subtask_id"]] = step.step_id
+        
         # 模拟进度跟踪
         progress_updates = []
-        total_tasks = len(agent_allocation.get("allocations", []))
+        total_tasks = len(allocations)
         
-        for i, allocation in enumerate(agent_allocation.get("allocations", [])):
+        for i, allocation in enumerate(allocations):
             # 模拟任务完成情况
             is_completed = i < total_tasks * 0.7  # 模拟70%的任务已完成
             progress = 100 if is_completed else 50
+            status = "completed" if is_completed else "in_progress"
+            
+            # 更新步骤进度
+            step_id = step_map[allocation["subtask_id"]]
+            task_progress.update_step_progress(step_id, progress, status)
             
             progress_update = {
                 "subtask_id": allocation["subtask_id"],
                 "subtask_name": allocation["subtask_name"],
                 "agent_name": allocation["agent_name"],
                 "progress": progress,
-                "status": "completed" if is_completed else "in_progress",
+                "status": status,
                 "updated_at": start_time.isoformat()
             }
             
             progress_updates.append(progress_update)
         
         # 计算整体进度
-        overall_progress = sum(p["progress"] for p in progress_updates) / len(progress_updates) if progress_updates else 0
+        overall_progress = task_progress.progress
         
+        # 保存到存储系统
+        storage.save(task_progress)
+        
+        # 生成详细的进度跟踪结果
         progress_tracking = {
+            "task_id": task_id,
+            "session_id": session_id,
+            "story_type": story_type,
             "progress_updates": progress_updates,
             "overall_progress": overall_progress,
-            "status": "in_progress" if overall_progress < 100 else "completed",
+            "status": task_progress.status,
             "tracking_at": start_time.isoformat(),
-            "completed_tasks": sum(1 for p in progress_updates if p["status"] == "completed"),
-            "total_tasks": len(progress_updates)
+            "completed_tasks": task_progress.completed_steps,
+            "total_tasks": task_progress.total_steps,
+            "current_step": task_progress.current_step,
+            "start_time": task_progress.start_time,
+            "estimated_end_time": task_progress.estimated_end_time,
+            "end_time": task_progress.end_time,
+            "step_details": [
+                {
+                    "step_id": step.step_id,
+                    "step_name": step.step_name,
+                    "agent_name": step.agent_name,
+                    "progress": step.progress,
+                    "status": step.status,
+                    "start_time": step.start_time,
+                    "end_time": step.end_time,
+                    "estimated_duration": step.estimated_duration,
+                    "actual_duration": step.actual_duration
+                }
+                for step in task_progress.step_progress
+            ],
+            "anomalies": [
+                {
+                    "anomaly_id": anomaly.anomaly_id,
+                    "type": anomaly.type,
+                    "severity": anomaly.severity,
+                    "description": anomaly.description,
+                    "detected_at": anomaly.detected_at,
+                    "resolved": anomaly.resolved,
+                    "resolution": anomaly.resolution
+                }
+                for anomaly in task_progress.anomalies
+            ]
         }
         
         return progress_tracking
+    
+    async def get_task_progress(self, task_id: str) -> Dict[str, Any]:
+        """
+        获取任务进度
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            任务进度信息
+        """
+        progress = storage.get(task_id)
+        if progress:
+            return progress.to_dict()
+        else:
+            return {
+                "error": "Task not found",
+                "task_id": task_id
+            }
+    
+    async def update_task_progress(self, task_id: str, step_id: str, progress: float, status: str = "running") -> Dict[str, Any]:
+        """
+        更新任务进度
+        
+        Args:
+            task_id: 任务ID
+            step_id: 步骤ID
+            progress: 进度（0-100）
+            status: 状态
+            
+        Returns:
+            更新后的任务进度信息
+        """
+        task_progress = storage.get(task_id)
+        if task_progress:
+            task_progress.update_step_progress(step_id, progress, status)
+            storage.save(task_progress)
+            return task_progress.to_dict()
+        else:
+            return {
+                "error": "Task not found",
+                "task_id": task_id
+            }
+    
+    async def list_tasks(self, session_id: str = None) -> List[Dict[str, Any]]:
+        """
+        列出所有任务
+        
+        Args:
+            session_id: 会话ID（可选）
+            
+        Returns:
+            任务列表
+        """
+        if session_id:
+            tasks = storage.get_by_session(session_id)
+        else:
+            tasks = storage.list_all()
+        
+        return [task.to_dict() for task in tasks]
+    
+    async def delete_task(self, task_id: str) -> Dict[str, Any]:
+        """
+        删除任务
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            删除结果
+        """
+        storage.delete(task_id)
+        return {
+            "message": "Task deleted successfully",
+            "task_id": task_id
+        }
     
     async def summarize_task_results(self, progress_tracking: Dict[str, Any]) -> Dict[str, Any]:
         """
