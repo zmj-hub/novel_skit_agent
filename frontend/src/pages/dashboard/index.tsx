@@ -352,7 +352,7 @@ const Dashboard: React.FC = () => {
                       <Text strong className="text-slate-700">
                         {getAgentName(agent)}
                       </Text>
-                      {getAgentStatusBadge(status)}
+                        {getAgentStatusBadge(status as string)}
                     </div>
                     <div className="flex items-center text-sm text-slate-500">
                       {getAgentIcon(agent)}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Typography, Input, Button, List, Avatar, Space, Switch, Select, message, Card, Divider } from 'antd';
-import { SendOutlined, UserOutlined, RobotOutlined, DatabaseOutlined, SettingsOutlined, PlusOutlined, ClearOutlined, SmileOutlined } from '@ant-design/icons';
+import { SendOutlined, UserOutlined, RobotOutlined, DatabaseOutlined, SettingOutlined, PlusOutlined, ClearOutlined, SmileOutlined } from '@ant-design/icons';
 import Layout from '../../components/layout/Layout';
 import Loading from '../../components/common/Loading';
 import api from '../../services/api';
@@ -255,7 +255,7 @@ const Chat: React.FC = () => {
               />
             </Space>
             <Space>
-              <SettingsOutlined style={{ color: '#1a365d' }} />
+              <SettingOutlined style={{ color: '#1a365d' }} />
               <span className="text-gray-700">模型选择</span>
               <Select
                 value={model}

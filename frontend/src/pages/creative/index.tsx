@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Typography, Form, Input, Select, Button, Tag, message, Divider, Space, Card, Alert, Tabs, Tooltip } from 'antd';
-import { RocketOutlined, FireOutlined, BookOutlined, SettingsOutlined, FileTextOutlined, ArrowRightOutlined, PlusOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
+import { RocketOutlined, FireOutlined, BookOutlined, SettingOutlined, FileTextOutlined, ArrowRightOutlined, PlusOutlined, DeleteOutlined, CopyOutlined } from '@ant-design/icons';
 import Layout from '../../components/layout/Layout';
 import Loading from '../../components/common/Loading';
 import api from '../../services/api';
@@ -195,7 +195,7 @@ const Creative: React.FC = () => {
               name="model"
               label={
                 <Space>
-                  <SettingsOutlined style={{ color: '#1a365d' }} />
+                  <SettingOutlined style={{ color: '#1a365d' }} />
                   <span className="font-medium">模型选择</span>
                 </Space>
               }
@@ -358,7 +358,7 @@ const Creative: React.FC = () => {
 
 // 缺少的图标组件
 const InfoCircleOutlined = (props: any) => {
-  return <SettingsOutlined {...props} />;
+  return <SettingOutlined {...props} />;
 };
 
 export default Creative;

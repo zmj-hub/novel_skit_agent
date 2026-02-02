@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Typography, Form, Input, Select, Button, message, Divider, Space, Card, Alert, Tabs, Descriptions, Table, Progress, Badge } from 'antd';
-import { BookOutlined, SettingsOutlined, FileTextOutlined, DownloadOutlined, ArrowLeftOutlined, RocketOutlined, CopyOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
+import { BookOutlined, SettingOutlined, FileTextOutlined, DownloadOutlined, ArrowLeftOutlined, RocketOutlined, CopyOutlined, EditOutlined, EyeOutlined } from '@ant-design/icons';
 import Layout from '../../components/layout/Layout';
 import Loading from '../../components/common/Loading';
 import api from '../../services/api';
@@ -392,7 +392,7 @@ const Novel: React.FC = () => {
               name="style"
               label={
                 <Space>
-                  <SettingsOutlined style={{ color: '#1a365d' }} />
+                  <SettingOutlined style={{ color: '#1a365d' }} />
                   <span className="font-medium">文风类型</span>
                 </Space>
               }
@@ -437,7 +437,7 @@ const Novel: React.FC = () => {
               name="model"
               label={
                 <Space>
-                  <SettingsOutlined style={{ color: '#1a365d' }} />
+                  <SettingOutlined style={{ color: '#1a365d' }} />
                   <span className="font-medium">模型选择</span>
                 </Space>
               }

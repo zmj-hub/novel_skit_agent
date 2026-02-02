@@ -658,38 +658,57 @@ async def result_summary_node(state: Dict[str, Any]) -> Dict[str, Any]:
 def create_scheduler_workflow():
     """
     创建协同调度工作流
+    
+    此函数创建一个完整的协同调度工作流，用于管理和执行多智能体任务。
+    工作流包含任务规划、分解、智能体分配、执行、监控和报告生成等环节。
+    
+    Returns:
+        CompiledStateGraph: 编译后的工作流对象，可直接用于执行
     """
+    # 初始化工作流状态图，使用字典作为状态类型
     workflow = StateGraph(dict)
     
-    # 原有节点
-    workflow.add_node("create_schedule", create_schedule_node)
-    workflow.add_node("detect_conflicts", detect_conflicts_node)
-    workflow.add_node("allocate_resources", allocate_resources_node)
+    # 原有节点 - 调度核心功能
+    workflow.add_node("create_schedule", create_schedule_node)  # 创建任务调度计划
+    workflow.add_node("detect_conflicts", detect_conflicts_node)  # 检测任务冲突
+    workflow.add_node("allocate_resources", allocate_resources_node)  # 分配资源
     
-    # 新增节点
-    workflow.add_node("task_planning", task_planning_node)
-    workflow.add_node("task_breakdown", task_breakdown_node)
-    workflow.add_node("agent_allocation", agent_allocation_node)
-    workflow.add_node("progress_tracking", progress_tracking_node)
-    workflow.add_node("result_summary", result_summary_node)
+    # 新增节点 - 增强功能模块
+    workflow.add_node("task_planning", task_planning_node)  # 任务整体规划
+    workflow.add_node("task_breakdown", task_breakdown_node)  # 任务分解为子任务
+    workflow.add_node("agent_allocation", agent_allocation_node)  # 智能体分配到具体任务
+    workflow.add_node("progress_tracking", progress_tracking_node)  # 任务执行进度跟踪
+    workflow.add_node("result_summary", result_summary_node)  # 任务结果汇总
     
-    # 原有节点
-    workflow.add_node("execute_workflow", execute_workflow_node)
-    workflow.add_node("generate_reports", generate_reports_node)
+    # 原有节点 - 执行和报告
+    workflow.add_node("execute_workflow", execute_workflow_node)  # 执行工作流
+    workflow.add_node("generate_reports", generate_reports_node)  # 生成执行报告
     
-    # 设置工作流流程
+    # 设置工作流执行流程
+    # 1. 开始于任务规划
     workflow.set_entry_point("task_planning")
+    # 2. 任务规划 → 任务分解
     workflow.add_edge("task_planning", "task_breakdown")
+    # 3. 任务分解 → 智能体分配
     workflow.add_edge("task_breakdown", "agent_allocation")
+    # 4. 智能体分配 → 创建调度计划
     workflow.add_edge("agent_allocation", "create_schedule")
+    # 5. 创建调度计划 → 检测冲突
     workflow.add_edge("create_schedule", "detect_conflicts")
+    # 6. 检测冲突 → 分配资源
     workflow.add_edge("detect_conflicts", "allocate_resources")
+    # 7. 分配资源 → 执行工作流
     workflow.add_edge("allocate_resources", "execute_workflow")
+    # 8. 执行工作流 → 进度跟踪
     workflow.add_edge("execute_workflow", "progress_tracking")
+    # 9. 进度跟踪 → 结果汇总
     workflow.add_edge("progress_tracking", "result_summary")
+    # 10. 结果汇总 → 生成报告
     workflow.add_edge("result_summary", "generate_reports")
+    # 11. 生成报告 → 工作流结束
     workflow.add_edge("generate_reports", END)
     
+    # 编译工作流并返回
     return workflow.compile()
 
 

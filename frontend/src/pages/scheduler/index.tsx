@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Typography, Form, Input, Select, Button, message, Divider, Space, Card, Alert, Progress, Timeline, Table, Tag } from 'antd';
+import React, { useState, useEffect, useRef } from 'react';
+import { Typography, Form, Input, Select, Button, message, Divider, Space, Card, Alert, Progress, Timeline, Table, Tag, notification } from 'antd';
 import { 
   ScheduleOutlined, 
   RocketOutlined, 
@@ -10,7 +10,9 @@ import {
   CloseCircleOutlined, 
   TeamOutlined,
   BarChartOutlined,
-  UserOutlined
+  UserOutlined,
+  SyncOutlined,
+  WebSocketOutlined
 } from '@ant-design/icons';
 import Layout from '../../components/layout/Layout';
 import Loading from '../../components/common/Loading';
@@ -48,6 +50,13 @@ const Scheduler: React.FC = () => {
   const [progress, setProgress] = useState<number>(0);
   const [progressUpdates, setProgressUpdates] = useState<ProgressUpdate[]>([]);
   const [allocations, setAllocations] = useState<Allocation[]>([]);
+  
+  // WebSocket相关状态
+  const [websocket, setWebsocket] = useState<WebSocket | null>(null);
+  const [wsConnected, setWsConnected] = useState<boolean>(false);
+  const [wsError, setWsError] = useState<string | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const sessionIdRef = useRef<string>('');
 
   // 故事类型选项
   const storyTypes = [
@@ -61,11 +70,150 @@ const Scheduler: React.FC = () => {
     { value: '恐怖', label: '恐怖' },
   ];
 
+  // WebSocket连接函数
+  const connectWebSocket = (sessionId: string) => {
+    try {
+      // 关闭现有连接
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+
+      // 构建WebSocket URL
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/api/scheduler/ws/${sessionId}`;
+
+      // 创建新的WebSocket连接
+      const ws = new WebSocket(wsUrl);
+      
+      // 保存到ref和state
+      wsRef.current = ws;
+      setWebsocket(ws);
+      
+      // 连接打开
+      ws.onopen = () => {
+        console.log('WebSocket连接已建立');
+        setWsConnected(true);
+        setWsError(null);
+        notification.success({
+          message: '实时连接已建立',
+          description: '您将实时收到任务执行进度更新',
+          icon: <WebSocketOutlined style={{ color: '#52c41a' }} />,
+        });
+      };
+      
+      // 接收消息
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('收到WebSocket消息:', data);
+          
+          // 处理进度更新
+          handleProgressUpdate(data);
+        } catch (error) {
+          console.error('解析WebSocket消息失败:', error);
+        }
+      };
+      
+      // 连接错误
+      ws.onerror = (error) => {
+        console.error('WebSocket错误:', error);
+        setWsError('WebSocket连接错误');
+        notification.error({
+          message: '实时连接错误',
+          description: '无法建立实时连接，将使用轮询获取进度',
+          icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
+        });
+      };
+      
+      // 连接关闭
+      ws.onclose = () => {
+        console.log('WebSocket连接已关闭');
+        setWsConnected(false);
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+          setWebsocket(null);
+        }
+      };
+    } catch (error) {
+      console.error('建立WebSocket连接失败:', error);
+      setWsError('无法建立WebSocket连接');
+      notification.error({
+        message: '实时连接失败',
+        description: '将使用轮询获取进度更新',
+        icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
+      });
+    }
+  };
+
+  // 处理进度更新
+  const handleProgressUpdate = (progressData: any) => {
+    // 更新整体进度
+    if (progressData.overall_progress !== undefined) {
+      setProgress(progressData.overall_progress);
+    }
+    
+    // 更新进度更新列表
+    if (progressData.updates && Array.isArray(progressData.updates)) {
+      setProgressUpdates(progressData.updates);
+    }
+    
+    // 更新状态
+    if (progressData.status) {
+      // 可以根据状态显示不同的通知
+      switch (progressData.status) {
+        case 'completed':
+          notification.success({
+            message: '任务完成',
+            description: '所有任务已成功完成',
+            icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+          });
+          break;
+        case 'failed':
+          notification.error({
+            message: '任务失败',
+            description: progressData.message || '任务执行失败',
+            icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
+          });
+          break;
+        case 'running':
+          // 可以显示正在执行的任务信息
+          if (progressData.message) {
+            notification.info({
+              message: '任务执行中',
+              description: progressData.message,
+              icon: <SyncOutlined style={{ color: '#1890ff' }} />,
+            });
+          }
+          break;
+      }
+    }
+  };
+
+  // 关闭WebSocket连接
+  const disconnectWebSocket = () => {
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+      setWebsocket(null);
+      setWsConnected(false);
+    }
+  };
+
+  // 组件卸载时关闭WebSocket连接
+  useEffect(() => {
+    return () => {
+      disconnectWebSocket();
+    };
+  }, []);
+
   // 处理表单提交
   const handleSubmit = async (values: any) => {
     setLoading(true);
     setShowResult(false);
     setProgress(0);
+
+    // 保存会话ID到ref
+    sessionIdRef.current = values.session_id;
 
     // 构建请求参数
     const requestData = {
@@ -76,7 +224,10 @@ const Scheduler: React.FC = () => {
       model: values.model
     };
 
-    // 模拟进度更新
+    // 建立WebSocket连接
+    connectWebSocket(values.session_id);
+
+    // 模拟进度更新（仅作为备用）
     const progressInterval = setInterval(() => {
       setProgress(prev => {
         if (prev >= 100) {
@@ -331,9 +482,9 @@ const Scheduler: React.FC = () => {
     <Layout title="故事创作调度 - 小说创作助手">
       <div className="scheduler-container space-y-8">
         {/* 页面标题 */}
-        <div>
+        <div className="animate-fade-in">
           <div className="flex items-center space-x-3 mb-2">
-            <ScheduleOutlined className="text-indigo-600" style={{ fontSize: '24px' }} />
+            <ScheduleOutlined className="text-indigo-600 animate-pulse" style={{ fontSize: '24px' }} />
             <Title level={2} className="text-gray-800 mb-0">故事创作调度</Title>
           </div>
           <Text type="secondary">智能协调系统，为您的故事创作任务提供高效的智能体协作方案</Text>
@@ -348,7 +499,7 @@ const Scheduler: React.FC = () => {
             </Space>
           }
           variant="borderless"
-          className="shadow-md rounded-lg overflow-hidden"
+          className="shadow-md rounded-lg overflow-hidden transition-all duration-300 hover:shadow-lg hover:-translate-y-1"
           style={{ 
             background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(249,250,251,0.95) 100%)',
             boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
@@ -463,7 +614,7 @@ const Scheduler: React.FC = () => {
                 loading={loading}
                 size="large"
                 icon={<RocketOutlined />}
-                className="w-full rounded-lg"
+                className="w-full rounded-lg transition-all duration-300 hover:shadow-lg hover:scale-105 active:scale-95"
                 style={{ 
                   background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
                   border: 'none',
@@ -478,24 +629,159 @@ const Scheduler: React.FC = () => {
           </Form>
         </Card>
 
-        {/* 进度显示 */}
+        {/* 实时进度显示 */}
         {loading && (
           <Card
-            title="调度进度"
+            title={
+              <Space>
+                <SyncOutlined className="text-indigo-600" />
+                <span>实时调度进度</span>
+                <Tag color={wsConnected ? 'green' : 'red'} size="small">
+                  {wsConnected ? '实时连接' : '无实时连接'}
+                </Tag>
+              </Space>
+            }
             variant="borderless"
             className="shadow-md rounded-lg overflow-hidden"
+            style={{ 
+              background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(249,250,251,0.95) 100%)',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
+            }}
           >
-            <div className="space-y-4">
-              <Progress 
-                percent={progress} 
-                status="active"
-                className="rounded-full"
-                strokeColor={{
-                  from: '#6366f1',
-                  to: '#4f46e5',
-                }}
-              />
-              <Text className="text-center block">正在调度故事创作任务，请稍候...</Text>
+            <div className="space-y-6">
+              {/* 整体进度条 */}
+              <div>
+                <div className="flex justify-between items-center mb-2">
+                  <Text strong>整体进度</Text>
+                  <Text strong>{progress}%</Text>
+                </div>
+                <Progress 
+                  percent={progress} 
+                  status={progress >= 100 ? 'success' : 'active'}
+                  className="rounded-full"
+                  strokeColor={{
+                    from: '#6366f1',
+                    to: '#4f46e5',
+                  }}
+                  size="large"
+                />
+              </div>
+              
+              {/* 智能体状态卡片 */}
+              <div>
+                <Title level={5} className="text-gray-700 mb-4">智能体状态</Title>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* 创意智能体状态卡片 */}
+                  <Card 
+                    size="small" 
+                    className="border border-gray-100 transition-all duration-300 hover:shadow-md hover:-translate-y-1 hover:border-purple-300"
+                    style={{ borderRadius: '12px' }}
+                  >
+                    <div className="flex items-center space-x-3 mb-3">
+                      <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                        <TeamOutlined className="text-purple-600" />
+                      </div>
+                      <div>
+                        <Text strong>创意智能体</Text>
+                        <div className="text-xs text-gray-500">负责创意构思与大纲设计</div>
+                      </div>
+                    </div>
+                    <Progress percent={progress > 50 ? 100 : progress * 2} status="active" size="small" />
+                    <Text className="text-xs text-gray-500 mt-2 block">
+                      {progress < 25 ? '待开始' : progress < 50 ? '进行中' : '已完成'}
+                    </Text>
+                  </Card>
+                  
+                  {/* 剧本智能体状态卡片 */}
+                  <Card 
+                    size="small" 
+                    className="border border-gray-100 transition-all duration-300 hover:shadow-md hover:-translate-y-1 hover:border-blue-300"
+                    style={{ borderRadius: '12px' }}
+                  >
+                    <div className="flex items-center space-x-3 mb-3">
+                      <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                        <BookOutlined className="text-blue-600" />
+                      </div>
+                      <div>
+                        <Text strong>剧本智能体</Text>
+                        <div className="text-xs text-gray-500">负责细节描写与场景渲染</div>
+                      </div>
+                    </div>
+                    <Progress percent={progress > 75 ? 100 : progress > 50 ? (progress - 50) * 4 : 0} status="active" size="small" />
+                    <Text className="text-xs text-gray-500 mt-2 block">
+                      {progress < 50 ? '待开始' : progress < 75 ? '进行中' : '已完成'}
+                    </Text>
+                  </Card>
+                  
+                  {/* 调度智能体状态卡片 */}
+                  <Card 
+                    size="small" 
+                    className="border border-gray-100 transition-all duration-300 hover:shadow-md hover:-translate-y-1 hover:border-indigo-300"
+                    style={{ borderRadius: '12px' }}
+                  >
+                    <div className="flex items-center space-x-3 mb-3">
+                      <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center">
+                        <ScheduleOutlined className="text-indigo-600" />
+                      </div>
+                      <div>
+                        <Text strong>调度智能体</Text>
+                        <div className="text-xs text-gray-500">负责任务协调与资源分配</div>
+                      </div>
+                    </div>
+                    <Progress percent={progress} status="active" size="small" />
+                    <Text className="text-xs text-gray-500 mt-2 block">
+                      {progress < 100 ? '进行中' : '已完成'}
+                    </Text>
+                  </Card>
+                </div>
+              </div>
+              
+              {/* 任务时间线 */}
+              <div>
+                <Title level={5} className="text-gray-700 mb-4">任务执行时间线</Title>
+                <Timeline items={[
+                  {
+                    children: <Text>开始处理调度请求</Text>,
+                    status: progress > 0 ? 'success' : 'default',
+                  },
+                  {
+                    children: <Text>执行任务规划</Text>,
+                    status: progress > 20 ? 'success' : progress > 0 ? 'active' : 'default',
+                  },
+                  {
+                    children: <Text>执行任务分解</Text>,
+                    status: progress > 40 ? 'success' : progress > 20 ? 'active' : 'default',
+                  },
+                  {
+                    children: <Text>执行智能体分配</Text>,
+                    status: progress > 60 ? 'success' : progress > 40 ? 'active' : 'default',
+                  },
+                  {
+                    children: <Text>执行工作流</Text>,
+                    status: progress > 80 ? 'success' : progress > 60 ? 'active' : 'default',
+                  },
+                  {
+                    children: <Text>生成执行报告</Text>,
+                    status: progress > 90 ? 'success' : progress > 80 ? 'active' : 'default',
+                  },
+                  {
+                    children: <Text>任务完成</Text>,
+                    status: progress === 100 ? 'success' : progress > 90 ? 'active' : 'default',
+                  },
+                ]} />
+              </div>
+              
+              {/* 状态信息 */}
+              <div className="bg-gray-50 p-4 rounded-lg">
+                <Text className="text-center block">
+                  {progress < 20 && '正在初始化调度系统...'}
+                  {progress >= 20 && progress < 40 && '正在规划故事创作任务...'}
+                  {progress >= 40 && progress < 60 && '正在分解任务并分配智能体...'}
+                  {progress >= 60 && progress < 80 && '正在执行工作流...'}
+                  {progress >= 80 && progress < 100 && '正在生成执行报告...'}
+                  {progress === 100 && '任务调度已完成！'}
+                </Text>
+              </div>
             </div>
           </Card>
         )}
