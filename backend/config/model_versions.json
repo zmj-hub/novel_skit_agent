@@ -7,7 +7,7 @@
         "name": "Qwen/Qwen3-235B-A22B-Instruct-2507",
         "description": "协调智能体默认模型，负责任务分发、流程控制与跨智能体通信",
         "is_active": true,
-        "created_at": "2026-02-02T18:19:41.343261",
+        "created_at": "2026-02-03T17:34:06.589356",
         "last_used_at": null,
         "compatibility": {
           "agents": [
@@ -29,7 +29,7 @@
         "name": "deepseek-chat",
         "description": "创意策划智能体默认模型，专注于创意生成与方案设计",
         "is_active": true,
-        "created_at": "2026-02-02T18:19:41.343261",
+        "created_at": "2026-02-03T17:34:06.590875",
         "last_used_at": null,
         "compatibility": {
           "agents": [
@@ -51,7 +51,7 @@
         "name": "Qwen/Qwen3-30B-A3B-Instruct-2507",
         "description": "剧本创作智能体默认模型，负责剧本内容的创作与优化",
         "is_active": true,
-        "created_at": "2026-02-02T18:19:41.344781",
+        "created_at": "2026-02-03T17:34:06.591386",
         "last_used_at": null,
         "compatibility": {
           "agents": [

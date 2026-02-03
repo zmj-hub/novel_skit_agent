@@ -209,6 +209,25 @@ const Scheduler: React.FC = () => {
 
   // 处理表单提交
   const handleSubmit = async (values: any) => {
+    console.log('Form submission triggered with values:', values);
+    console.log('Story description:', values.story_description);
+    console.log('Story type:', values.story_type);
+    console.log('Form values length:', Object.keys(values).length);
+
+    // 手动获取表单值进行验证
+    const formValues = form.getFieldsValue();
+    console.log('Manual form values:', formValues);
+    console.log('Manual story_description:', formValues.story_description);
+
+    // 手动验证表单
+    try {
+      await form.validateFields();
+      console.log('Form validation passed!');
+    } catch (error) {
+      console.error('Form validation failed:', error);
+      return;
+    }
+
     setLoading(true);
     setShowResult(false);
     setProgress(0);
@@ -225,19 +244,10 @@ const Scheduler: React.FC = () => {
       model: values.model
     };
 
+    console.log('Request data:', requestData);
+
     // 建立WebSocket连接
     connectWebSocket(values.session_id);
-
-    // 模拟进度更新（仅作为备用）
-    const progressInterval = setInterval(() => {
-      setProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(progressInterval);
-          return 100;
-        }
-        return prev + 5;
-      });
-    }, 200);
 
     try {
       // 真实API调用
@@ -277,7 +287,6 @@ const Scheduler: React.FC = () => {
       setProgressUpdates(result.progress_tracking.progress_updates);
       setAllocations(result.agent_allocation.allocations);
       setShowResult(true);
-      setProgress(100);
       message.success('故事创作任务调度成功！');
     } catch (error) {
       console.error('调度任务失败:', error);
@@ -444,11 +453,8 @@ const Scheduler: React.FC = () => {
       setProgressUpdates(mockResult.progress_tracking.progress_updates);
       setAllocations(mockResult.agent_allocation.allocations);
       setShowResult(true);
-      setProgress(100);
       message.success('故事创作任务调度成功（模拟数据）！');
     } finally {
-      clearInterval(progressInterval);
-      setProgress(100);
       setLoading(false);
     }
   };
@@ -511,8 +517,8 @@ const Scheduler: React.FC = () => {
             onFinish={handleSubmit}
             layout="vertical"
             initialValues={{
-              story_description: '一个关于人工智能与人类情感的科幻故事，讲述了一个AI助手与它的主人之间逐渐发展的情感纽带，以及他们共同面对的挑战',
-              story_type: '科幻',
+              story_description: '',
+              story_type: '历史',
               request_priority: 3,
               model: 'qwen3-30b',
               session_id: `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -528,13 +534,23 @@ const Scheduler: React.FC = () => {
                   <span>故事详细描述</span>
                 </Space>
               }
-              rules={[{ required: true, message: '请输入故事详细描述' }]}
+              rules={[
+                {
+                  required: true,
+                  message: '请输入故事详细描述',
+                  whitespace: true
+                }
+              ]}
               className="mb-6"
             >
               <TextArea
                 placeholder="请详细描述您想要创作的故事内容"
                 rows={6}
                 className="rounded-lg border-gray-300 focus:border-indigo-500 focus:ring focus:ring-indigo-200 focus:ring-opacity-50 transition-all"
+                onChange={(e) => {
+                  console.log('TextArea onChange:', e.target.value);
+                  console.log('Value length:', e.target.value.length);
+                }}
               />
               <Text type="secondary" className="block mt-2">详细的描述将帮助智能体更好地理解您的创作意图</Text>
             </Form.Item>
@@ -548,16 +564,25 @@ const Scheduler: React.FC = () => {
                   <span>故事类型</span>
                 </Space>
               }
-              rules={[{ required: true, message: '请选择故事类型' }]}
+              rules={[
+                {
+                  required: true,
+                  message: '请选择故事类型'
+                }
+              ]}
               className="mb-6"
             >
-              <Select 
+              <Select
+                className="w-full rounded-lg"
                 placeholder="请选择故事类型"
-                className="rounded-lg border-gray-300"
-                size="large"
+                onChange={(value) => {
+                  console.log('Select onChange:', value);
+                }}
               >
-                {storyTypes.map(type => (
-                  <Option key={type.value} value={type.value}>{type.label}</Option>
+                {storyTypes.map((type) => (
+                  <Option key={type.value} value={type.value}>
+                    {type.label}
+                  </Option>
                 ))}
               </Select>
             </Form.Item>

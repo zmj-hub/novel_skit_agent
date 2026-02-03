@@ -1,0 +1,72 @@
+{
+  "task_id": "task_953909df-2ad0-4efd-a26a-17089340aa6e",
+  "session_id": "session_de78d9cb-40ad-477a-b984-cf7a3d2d5180",
+  "story_type": "都市",
+  "status": "running",
+  "start_time": "2026-02-03T17:20:17.437934",
+  "end_time": null,
+  "estimated_end_time": null,
+  "current_step": "",
+  "completed_steps": 4,
+  "total_steps": 5,
+  "progress": 80.0,
+  "step_progress": [
+    {
+      "step_id": "39314b51-89a5-4c98-b4f1-bc262b76d8b3",
+      "step_name": "创意构思与大纲设计",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-03T17:20:17.437934",
+      "end_time": "2026-02-03T17:20:17.437934",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": "创意智能体"
+    },
+    {
+      "step_id": "7874d2a1-d884-467c-96df-563076056205",
+      "step_name": "人物设定与关系构建",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-03T17:20:17.437934",
+      "end_time": "2026-02-03T17:20:17.437934",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": "创意智能体"
+    },
+    {
+      "step_id": "3fbf46bc-5eca-4a94-9ee8-e69b4c861443",
+      "step_name": "情节发展与冲突设计",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-03T17:20:17.437934",
+      "end_time": "2026-02-03T17:20:17.437934",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": "创意智能体"
+    },
+    {
+      "step_id": "ebdc1981-a46c-4251-aa04-2c3470e9c2df",
+      "step_name": "细节描写与场景渲染",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-03T17:20:17.437934",
+      "end_time": "2026-02-03T17:20:17.437934",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": "剧本智能体"
+    },
+    {
+      "step_id": "d1f7ff0f-afae-41fe-ae8e-2b31934d51f1",
+      "step_name": "结局设计与主题升华",
+      "status": "in_progress",
+      "progress": 50,
+      "start_time": "2026-02-03T17:20:17.437934",
+      "end_time": null,
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": "剧本智能体"
+    }
+  ],
+  "anomalies": [],
+  "updated_at": "2026-02-03T17:20:17.437934"
+}

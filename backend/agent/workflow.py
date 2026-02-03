@@ -921,7 +921,7 @@ async def generate_reports_node(state: Dict[str, Any]) -> Dict[str, Any]:
         result["scheduling_log"] = scheduling_log
         result["exception_report"] = exception_report
         result["response"] = "Reports generated successfully"
-        result["processed_at"] = datetime.datetime.now().isoformat()
+        result["processed_at"] = datetime.now().isoformat()
         return result
     except Exception as e:
         print(f"Warning: Failed to generate reports: {e}")
@@ -930,7 +930,7 @@ async def generate_reports_node(state: Dict[str, Any]) -> Dict[str, Any]:
         result["scheduling_log"] = {"log_entries": [], "generated_at": "Error", "total_steps": 0, "included_steps": 0, "skipped_steps": 0}
         result["exception_report"] = {"exceptions": [], "generated_at": "Error", "total_exceptions": 0, "resolved_exceptions": 0, "unresolved_exceptions": 0}
         result["response"] = "Error generating reports"
-        result["processed_at"] = datetime.datetime.now().isoformat()
+        result["processed_at"] = datetime.now().isoformat()
         return result
 
 
