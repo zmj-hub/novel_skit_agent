@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     }
     
     # ModelScope Configuration
-    MODELSCOPE_API_KEY: Optional[str] = None
+    MODELSCOPE_API_KEY: Optional[str] = "ms-28a9e148-b281-404d-a7bf-4b732cb1a61e"
     MODELSCOPE_BASE_URL: str = "https://api-inference.modelscope.cn/v1"
     
     # Redis Configuration

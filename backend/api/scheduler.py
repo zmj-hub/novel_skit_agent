@@ -120,7 +120,7 @@ def validate_request_params(request: SchedulerRequest) -> None:
         HTTPException: 如果参数无效
     """
     # 验证故事描述
-    if not request.story_description or len(request.story_description.strip()) < 10:
+    if not request.story_description or len(request.story_description.strip()) < 1:
         raise HTTPException(
             status_code=400,
             detail="故事描述不能为空且长度至少为10个字符"
