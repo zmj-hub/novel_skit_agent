@@ -1,0 +1,83 @@
+{
+  "task_id": "task_eb51903b-ef96-4813-94b4-0d14f6a07981",
+  "session_id": "session_1770450806074_xxleqw7v8",
+  "story_type": "历史",
+  "status": "completed",
+  "start_time": "2026-02-07T15:53:46.537405",
+  "end_time": "2026-02-07T15:53:46.549498",
+  "estimated_end_time": null,
+  "current_step": "step_5",
+  "completed_steps": 6,
+  "total_steps": 6,
+  "progress": 100,
+  "step_progress": [
+    {
+      "step_id": "d3508df2-aecd-42e3-b4c2-d56bb2589d98",
+      "step_name": "step_0",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-07T15:53:46.537405",
+      "end_time": "2026-02-07T15:53:46.538987",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": ""
+    },
+    {
+      "step_id": "bec7cc9b-0b35-47bd-8d73-635a60316890",
+      "step_name": "step_1",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-07T15:53:46.537405",
+      "end_time": "2026-02-07T15:53:46.540631",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": ""
+    },
+    {
+      "step_id": "fac1df3b-bf8b-4652-9aad-04073ddd3f63",
+      "step_name": "step_2",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-07T15:53:46.537405",
+      "end_time": "2026-02-07T15:53:46.542224",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": ""
+    },
+    {
+      "step_id": "f561bde5-cb92-435b-b820-0400d54bf032",
+      "step_name": "step_3",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-07T15:53:46.537405",
+      "end_time": "2026-02-07T15:53:46.544810",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": ""
+    },
+    {
+      "step_id": "5592bbbd-a586-4275-bd02-455eee5ea10e",
+      "step_name": "step_4",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-07T15:53:46.537405",
+      "end_time": "2026-02-07T15:53:46.546406",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": ""
+    },
+    {
+      "step_id": "68238612-5504-44c0-b7d1-f0addf9c2a06",
+      "step_name": "step_5",
+      "status": "completed",
+      "progress": 100.0,
+      "start_time": "2026-02-07T15:53:46.537405",
+      "end_time": "2026-02-07T15:53:46.548445",
+      "estimated_duration": 0,
+      "actual_duration": 0,
+      "agent_name": ""
+    }
+  ],
+  "anomalies": [],
+  "updated_at": "2026-02-07T15:53:46.548445"
+}
