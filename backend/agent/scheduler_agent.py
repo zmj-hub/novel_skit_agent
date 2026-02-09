@@ -194,38 +194,57 @@ class CoordinationSchedulerAgent:
             }
         }
     
-    async def adapt_agent_workflow(self, schedule: Dict[str, Any]) -> Dict[str, Any]:
+    async def adapt_agent_workflow(self, schedule: Dict[str, Any], story_type: str = "都市") -> Dict[str, Any]:
         """
         适配智能体工作流
         
         Args:
             schedule: 工作时序表
+            story_type: 故事类型
             
         Returns:
-            适配结果，包含跳过的环节和原因
+            适配结果，包含可执行的步骤和类型定义
         """
         adapted_workflow = []
         skipped_steps = []
         
+        # 定义步骤类型映射
+        step_type_map = {
+            "market_analysis": "creative_planning",
+            "creative_generation": "creative_planning",
+            "novel_writing": "novel_writing",
+            "script_writing": "creative_planning",
+            "video_production": "generic",
+            "content_review": "quality_evaluation"
+        }
+        
         for step in schedule["schedule"]:
+            step_type = step_type_map.get(step["step_id"], "generic")
+            
             if step["agent_available"]:
                 adapted_workflow.append({
-                    "step_id": step["step_id"],
-                    "step_name": step["step_name"],
-                    "status": "included",
-                    "reason": "智能体可用"
+                    "name": step["step_id"],
+                    "type": step_type,
+                    "params": {
+                        "story_type": story_type,
+                        "step_name": step["step_name"]
+                    }
                 })
             else:
+                # 即使智能体不可用，也添加到工作流中作为通用步骤执行
                 adapted_workflow.append({
-                    "step_id": step["step_id"],
-                    "step_name": step["step_name"],
-                    "status": "skipped",
-                    "reason": "智能体尚未部署"
+                    "name": step["step_id"],
+                    "type": "generic",
+                    "params": {
+                        "story_type": story_type,
+                        "step_name": step["step_name"],
+                        "note": "智能体尚未部署，使用通用方式执行"
+                    }
                 })
                 skipped_steps.append({
                     "step_id": step["step_id"],
                     "step_name": step["step_name"],
-                    "reason": "智能体尚未部署",
+                    "reason": "智能体尚未部署，使用通用方式执行",
                     "skipped_at": datetime.datetime.now().isoformat()
                 })
         

@@ -20,6 +20,8 @@ class Settings(BaseSettings):
         "qwen-turbo": "qwen",
         "qwen-vl-plus": "qwen-multimodal",
         "Qwen/Qwen3-30B-A3B-Instruct-2507": "modelscope",
+        "qwen3-30b": "modelscope",
+        "qwen3-235b": "modelscope",
         "Qwen/Qwen3-72B-A3B-Instruct": "modelscope",
         "Qwen/Qwen3-235B-A22B-Instruct-2507": "modelscope",
         "meta-llama/Meta-Llama-3-8B-Instruct": "modelscope",

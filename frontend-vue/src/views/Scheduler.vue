@@ -80,6 +80,7 @@
                     </div>
                   </template>
                   <el-select v-model="formData.model" class="w-full">
+                    <el-option label="Qwen3-235B" value="qwen3-235b" />
                     <el-option label="Qwen3-30B" value="qwen3-30b" />
                     <el-option label="DeepSeek Chat" value="deepseek-chat" />
                     <el-option label="GPT-4" value="gpt-4" />
@@ -455,7 +456,7 @@ const formData = reactive({
   story_description: '',
   story_type: '历史',
   request_priority: 3,
-  model: 'qwen3-30b',
+  model: 'qwen3-235b',
   session_id: '',
 })
 

@@ -457,7 +457,8 @@ async def allocate_resources_node(state: Dict[str, Any]) -> Dict[str, Any]:
     try:
         agent = CoordinationSchedulerAgent(model)
         resource_allocations = await agent.allocate_resources(schedule, request_priority)
-        adapted_workflow = await agent.adapt_agent_workflow(schedule)
+        story_type = state.get('story_type', '都市')
+        adapted_workflow = await agent.adapt_agent_workflow(schedule, story_type)
         # 返回包含原始状态的数据
         result = state.copy()
         result["resource_allocations"] = resource_allocations
@@ -593,9 +594,42 @@ async def execute_workflow_step(
             logger.info(f"质量评估步骤执行完成: {step_name}")
             
         else:
-            # 通用步骤执行逻辑
+            # 通用步骤执行逻辑 - 调用LLM生成内容
             logger.info(f"执行通用步骤: {step_name}")
-            result = {"step_name": step_name, "status": "completed", "result": "Step executed successfully"}
+            
+            # 获取LLM实例
+            model = state.get("model", settings.DEFAULT_MODEL)
+            llm = llm_manager.get_llm(model)
+            
+            # 构建提示词
+            story_type = state.get("story_type", "未知")
+            story_description = state.get("story_description", "")
+            prompt = f"""你是一个专业的故事创作助手。请为以下故事执行任务：{step_name}
+
+故事类型：{story_type}
+故事描述：{story_description[:200]}...
+
+请提供详细的执行结果，包括具体的创作内容、分析和建议。
+"""
+            
+            # 调用LLM生成结果
+            try:
+                result_text = await llm.generate(prompt)
+                result = {
+                    "step_name": step_name,
+                    "step_type": step_type,
+                    "status": "completed",
+                    "result": result_text
+                }
+                logger.info(f"通用步骤 {step_name} 执行成功，生成了 {len(result_text)} 字符的内容")
+            except Exception as e:
+                logger.error(f"通用步骤 {step_name} 执行失败: {str(e)}")
+                result = {
+                    "step_name": step_name,
+                    "step_type": step_type,
+                    "status": "failed",
+                    "error": str(e)
+                }
         
         # 记录步骤结束时间
         end_time = datetime.now()

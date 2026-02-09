@@ -152,14 +152,27 @@ class ModelScopeLLM(BaseLLM):
         print(f"Initializing ModelScopeLLM with model: {model}")
         print(f"Using ModelScope API Key: {settings.MODELSCOPE_API_KEY[:10]}..." if settings.MODELSCOPE_API_KEY else "No ModelScope API Key provided")
         try:
-            self.model = model
+            # 模型ID映射 - 将简短模型ID转换为完整的ModelScope模型路径
+            model_mapping = {
+                "qwen3-30b": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+                "qwen3-72b": "Qwen/Qwen3-72B-A3B-Instruct",
+                "qwen3-235b": "Qwen/Qwen3-235B-A22B-Instruct-2507",
+                "llama3-8b": "meta-llama/Meta-Llama-3-8B-Instruct",
+                "llama3-70b": "meta-llama/Meta-Llama-3-70B-Instruct",
+                "gemma-7b": "google/gemma-7b-it"
+            }
+            
+            # 使用映射后的模型ID
+            self.model = model_mapping.get(model, model)
+            print(f"Using mapped model: {self.model}")
+            
             self.api_key = settings.MODELSCOPE_API_KEY
             self.base_url = settings.MODELSCOPE_BASE_URL
             self.llm = OpenAI(
                 base_url=self.base_url,
                 api_key=self.api_key,
             )
-            print(f"Successfully initialized ModelScopeLLM with model: {model}")
+            print(f"Successfully initialized ModelScopeLLM with model: {self.model}")
         except Exception as e:
             # 允许在没有 API Key 的情况下初始化，只是在使用时会报错
             print(f"Warning: Failed to initialize ModelScope LLM: {e}")

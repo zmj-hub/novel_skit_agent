@@ -148,8 +148,9 @@ def validate_request_params(request: SchedulerRequest) -> None:
             detail="会话ID不能为空且长度至少为5个字符"
         )
     
-    # 验证模型
-    valid_models = ["qwen3-30b", "deepseek-chat", "gpt-4"]
+    # 验证模型 - 使用配置中定义的所有有效模型
+    from core.config import settings
+    valid_models = list(settings.MODEL_PROVIDERS.keys())
     if not request.model or request.model not in valid_models:
         raise HTTPException(
             status_code=400,
