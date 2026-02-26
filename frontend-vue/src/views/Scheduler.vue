@@ -1,7 +1,6 @@
 <template>
   <Layout>
     <div class="scheduler">
-      <!-- 页面标题 -->
       <div class="page-header">
         <h1 class="page-title">
           <el-icon class="title-icon"><Timer /></el-icon>
@@ -10,7 +9,6 @@
         <p class="page-subtitle">智能协调系统，为您的故事创作任务提供高效的智能体协作方案</p>
       </div>
 
-      <!-- 调度表单 -->
       <el-card class="form-card" shadow="hover">
         <template #header>
           <div class="card-header">
@@ -26,7 +24,6 @@
           label-position="top"
           class="scheduler-form"
         >
-          <!-- 故事描述 -->
           <el-form-item label="故事详细描述" prop="story_description">
             <template #label>
               <div class="form-label">
@@ -44,7 +41,6 @@
             <div class="form-tip">详细的描述将帮助智能体更好地理解您的创作意图</div>
           </el-form-item>
 
-          <!-- 故事类型 -->
           <el-form-item label="故事类型" prop="story_type">
             <template #label>
               <div class="form-label">
@@ -66,7 +62,6 @@
             </el-select>
           </el-form-item>
 
-          <!-- 调度参数 -->
           <div class="param-section">
             <h3 class="param-title">调度参数</h3>
             
@@ -106,7 +101,6 @@
             </el-form-item>
           </div>
 
-          <!-- 提交按钮 -->
           <el-form-item>
             <el-button
               type="primary"
@@ -122,7 +116,6 @@
         </el-form>
       </el-card>
 
-      <!-- 实时进度显示（加载中） -->
       <el-card v-if="loading" class="progress-card" shadow="hover">
         <template #header>
           <div class="card-header">
@@ -137,7 +130,18 @@
         </template>
 
         <div class="progress-content">
-          <!-- 整体进度条 -->
+          <div class="time-info-card">
+            <div class="time-item">
+              <div class="time-label">已用时间</div>
+              <div class="time-value">{{ formatTime(elapsedTime) }}</div>
+            </div>
+            <div class="time-divider"></div>
+            <div class="time-item">
+              <div class="time-label">预计剩余</div>
+              <div class="time-value">{{ formatTime(estimatedRemainingTime) }}</div>
+            </div>
+          </div>
+
           <div class="overall-progress">
             <div class="progress-label">
               <span>整体进度</span>
@@ -151,7 +155,6 @@
             />
           </div>
 
-          <!-- 智能体状态卡片 -->
           <div class="agent-cards">
             <h4 class="section-title">智能体状态</h4>
             <el-row :gutter="16">
@@ -167,12 +170,12 @@
                     </div>
                   </div>
                   <el-progress
-                    :percentage="progress > 50 ? 100 : progress * 2"
-                    :status="progress > 50 ? 'success' : ''"
+                    :percentage="agentsStatus.creative.progress"
+                    :status="agentsStatus.creative.progress >= 100 ? 'success' : ''"
                     size="small"
                   />
-                  <div class="agent-status-text">
-                    {{ progress < 25 ? '待开始' : progress < 50 ? '进行中' : '已完成' }}
+                  <div class="agent-status-text" :class="getStatusClass(agentsStatus.creative.status)">
+                    {{ getAgentStatusText(agentsStatus.creative.status) }}
                   </div>
                 </el-card>
               </el-col>
@@ -189,12 +192,12 @@
                     </div>
                   </div>
                   <el-progress
-                    :percentage="progress > 75 ? 100 : progress > 50 ? (progress - 50) * 4 : 0"
-                    :status="progress > 75 ? 'success' : ''"
+                    :percentage="agentsStatus.script.progress"
+                    :status="agentsStatus.script.progress >= 100 ? 'success' : ''"
                     size="small"
                   />
-                  <div class="agent-status-text">
-                    {{ progress < 50 ? '待开始' : progress < 75 ? '进行中' : '已完成' }}
+                  <div class="agent-status-text" :class="getStatusClass(agentsStatus.script.status)">
+                    {{ getAgentStatusText(agentsStatus.script.status) }}
                   </div>
                 </el-card>
               </el-col>
@@ -211,19 +214,18 @@
                     </div>
                   </div>
                   <el-progress
-                    :percentage="progress"
-                    :status="progress === 100 ? 'success' : ''"
+                    :percentage="agentsStatus.scheduler.progress"
+                    :status="agentsStatus.scheduler.progress >= 100 ? 'success' : ''"
                     size="small"
                   />
-                  <div class="agent-status-text">
-                    {{ progress < 100 ? '进行中' : '已完成' }}
+                  <div class="agent-status-text" :class="getStatusClass(agentsStatus.scheduler.status)">
+                    {{ getAgentStatusText(agentsStatus.scheduler.status) }}
                   </div>
                 </el-card>
               </el-col>
             </el-row>
           </div>
 
-          <!-- 任务时间线 -->
           <div class="task-timeline">
             <h4 class="section-title">任务执行时间线</h4>
             <el-timeline>
@@ -238,7 +240,37 @@
             </el-timeline>
           </div>
 
-          <!-- 状态信息 -->
+          <div class="execution-logs">
+            <h4 class="section-title">任务执行日志</h4>
+            <div class="logs-container">
+              <div v-for="(log, index) in executionLogs" :key="index" class="log-item">
+                <div class="log-time">{{ log.time }}</div>
+                <div class="log-content">{{ log.message }}</div>
+              </div>
+              <div v-if="executionLogs.length === 0" class="no-logs">暂无日志</div>
+            </div>
+          </div>
+
+          <div class="content-display">
+            <h4 class="section-title">实时内容展示</h4>
+            <div class="content-container">
+              <div v-for="item in contentList" :key="item.id" class="content-item" :class="`content-type-${item.type}`">
+                <div class="content-header">
+                  <div class="content-left">
+                    <el-tag :type="getContentTypeTag(item.type)" size="small">{{ getContentTypeLabel(item.type) }}</el-tag>
+                    <span class="content-title">{{ item.title }}</span>
+                    <span class="content-time">{{ item.time }}</span>
+                  </div>
+                  <el-button :icon="item.copied ? Check : DocumentCopy" circle size="small" @click="copyContent(item)" />
+                </div>
+                <div class="content-body">
+                  <div class="content-preview">{{ item.content }}</div>
+                </div>
+              </div>
+              <div v-if="contentList.length === 0" class="no-content">暂无内容</div>
+            </div>
+          </div>
+
           <div class="status-info">
             <el-alert
               :title="statusText"
@@ -250,9 +282,7 @@
         </div>
       </el-card>
 
-      <!-- 调度结果 -->
       <template v-if="showResult && schedulerResult">
-        <!-- 实时任务进度 -->
         <el-card class="result-card" shadow="hover">
           <template #header>
             <div class="card-header">
@@ -268,7 +298,6 @@
           />
         </el-card>
 
-        <!-- 调度结果 -->
         <el-card class="result-card" shadow="hover">
           <template #header>
             <div class="card-header">
@@ -278,7 +307,6 @@
           </template>
 
           <div class="result-content">
-            <!-- 状态提示 -->
             <el-alert
               :title="`调度状态: ${schedulerResult.result_summary.status === 'completed' ? '已完成' : '进行中'}`"
               :type="schedulerResult.result_summary.status === 'completed' ? 'success' : 'info'"
@@ -288,7 +316,6 @@
 
             <el-divider />
 
-            <!-- 任务概览 -->
             <div class="overview-section">
               <h4 class="section-title">任务概览</h4>
               <el-descriptions :column="2" border>
@@ -309,7 +336,6 @@
 
             <el-divider />
 
-            <!-- 智能体分配 -->
             <div class="allocation-section">
               <h4 class="section-title">智能体分配</h4>
               <el-table :data="allocations" style="width: 100%" border>
@@ -339,7 +365,6 @@
 
             <el-divider />
 
-            <!-- 进度跟踪 -->
             <div class="tracking-section">
               <h4 class="section-title">进度跟踪</h4>
               <el-table :data="progressUpdates" style="width: 100%" border>
@@ -362,7 +387,6 @@
 
             <el-divider />
 
-            <!-- 关键成果 -->
             <div class="achievements-section">
               <h4 class="section-title">关键成果</h4>
               <div class="achievements-list">
@@ -377,7 +401,6 @@
               </div>
             </div>
 
-            <!-- 下一步 -->
             <div class="next-steps-section">
               <h4 class="section-title">下一步</h4>
               <div class="next-steps-list">
@@ -412,34 +435,35 @@ import {
   Cloudy,
   CircleCheck,
   ArrowRight,
+  DocumentCopy,
+  Check,
 } from '@element-plus/icons-vue'
 import Layout from '@/components/layout/Layout.vue'
 import WebSocketProgress from '@/components/progress/WebSocketProgress.vue'
 import api from '@/services/api'
 import endpoints from '@/services/endpoints'
+import websocketService from '@/services/websocket'
 
-// 表单引用
 const formRef = ref(null)
-
-// 加载状态
 const loading = ref(false)
 const showResult = ref(false)
-
-// 进度相关
 const progress = ref(0)
 const progressUpdates = ref([])
 const allocations = ref([])
-
-// WebSocket相关
-const websocket = ref(null)
 const wsConnected = ref(false)
 const wsError = ref(null)
-const sessionIdRef = ref('')
-
-// 调度结果
 const schedulerResult = ref(null)
+const elapsedTime = ref(0)
+const estimatedRemainingTime = ref(0)
+const executionLogs = ref([])
+const contentList = ref([])
 
-// 故事类型选项
+const agentsStatus = reactive({
+  creative: { progress: 0, status: 'pending' },
+  script: { progress: 0, status: 'pending' },
+  scheduler: { progress: 0, status: 'pending' }
+})
+
 const storyTypes = [
   { value: '科幻', label: '科幻' },
   { value: '悬疑', label: '悬疑' },
@@ -451,7 +475,6 @@ const storyTypes = [
   { value: '恐怖', label: '恐怖' },
 ]
 
-// 表单数据
 const formData = reactive({
   story_description: '',
   story_type: '历史',
@@ -460,7 +483,6 @@ const formData = reactive({
   session_id: '',
 })
 
-// 表单验证规则
 const formRules = {
   story_description: [
     { required: true, message: '请输入故事详细描述', trigger: 'blur' },
@@ -471,7 +493,6 @@ const formRules = {
   ],
 }
 
-// 时间线项目
 const timelineItems = computed(() => [
   { content: '开始处理调度请求', type: progress.value > 0 ? 'success' : '', icon: progress.value > 0 ? CircleCheck : '' },
   { content: '执行任务规划', type: progress.value > 20 ? 'success' : progress.value > 0 ? 'primary' : '', icon: progress.value > 20 ? CircleCheck : '' },
@@ -482,7 +503,6 @@ const timelineItems = computed(() => [
   { content: '任务完成', type: progress.value === 100 ? 'success' : progress.value > 90 ? 'primary' : '', icon: progress.value === 100 ? CircleCheck : '' },
 ])
 
-// 状态文本
 const statusText = computed(() => {
   if (progress.value < 20) return '正在初始化调度系统...'
   if (progress.value < 40) return '正在规划故事创作任务...'
@@ -492,84 +512,109 @@ const statusText = computed(() => {
   return '任务调度已完成！'
 })
 
-// 生成会话ID
+const formatTime = (seconds) => {
+  if (!seconds || seconds <= 0) return '--:--'
+  const mins = Math.floor(seconds / 60)
+  const secs = Math.floor(seconds % 60)
+  return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+}
+
+const getAgentStatusText = (status) => {
+  const texts = {
+    pending: '待开始',
+    in_progress: '进行中',
+    completed: '已完成',
+    failed: '失败'
+  }
+  return texts[status] || '未知'
+}
+
+const getStatusClass = (status) => {
+  return `status-${status}`
+}
+
 const generateSessionId = () => {
   return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
 
-// WebSocket连接
-const connectWebSocket = (sessionId) => {
+const addExecutionLog = (message) => {
+  const now = new Date()
+  const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+  executionLogs.value.unshift({ time, message })
+  if (executionLogs.value.length > 50) {
+    executionLogs.value.pop()
+  }
+}
+
+const addContent = (data) => {
+  const now = new Date()
+  const time = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
+  contentList.value.unshift({
+    id: Date.now(),
+    title: data.title || '内容',
+    type: data.type || 'default',
+    content: data.content,
+    time: time,
+    copied: false
+  })
+}
+
+const copyContent = async (item) => {
   try {
-    // 关闭现有连接
-    if (websocket.value) {
-      websocket.value.close()
-    }
-
-    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${wsProtocol}//${window.location.host}/api/scheduler/ws/${sessionId}`
-
-    const ws = new WebSocket(wsUrl)
-    websocket.value = ws
-
-    ws.onopen = () => {
-      console.log('WebSocket连接已建立')
-      wsConnected.value = true
-      wsError.value = null
-      ElNotification.success({
-        title: '实时连接已建立',
-        message: '您将实时收到任务执行进度更新',
-        duration: 3000,
-      })
-    }
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        console.log('收到WebSocket消息:', data)
-        handleProgressUpdate(data)
-      } catch (error) {
-        console.error('解析WebSocket消息失败:', error)
-      }
-    }
-
-    ws.onerror = (error) => {
-      console.error('WebSocket错误:', error)
-      wsError.value = 'WebSocket连接错误'
-      ElNotification.error({
-        title: '实时连接错误',
-        message: '无法建立实时连接，将使用轮询获取进度',
-        duration: 3000,
-      })
-    }
-
-    ws.onclose = () => {
-      console.log('WebSocket连接已关闭')
-      wsConnected.value = false
-      websocket.value = null
-    }
-  } catch (error) {
-    console.error('建立WebSocket连接失败:', error)
-    wsError.value = '无法建立WebSocket连接'
+    await navigator.clipboard.writeText(item.content)
+    item.copied = true
+    setTimeout(() => {
+      item.copied = false
+    }, 2000)
+    ElMessage.success('内容已复制到剪贴板')
+  } catch (err) {
+    ElMessage.error('复制失败')
   }
 }
 
-// 关闭WebSocket连接
-const disconnectWebSocket = () => {
-  if (websocket.value) {
-    websocket.value.close()
-    websocket.value = null
-    wsConnected.value = false
+const updateAgentsStatus = (data) => {
+  if (data.overall_progress !== undefined) {
+    const p = data.overall_progress
+    if (p <= 50) {
+      agentsStatus.creative.progress = Math.min(p * 2, 100)
+      agentsStatus.creative.status = agentsStatus.creative.progress >= 100 ? 'completed' : 'in_progress'
+      agentsStatus.script.progress = 0
+      agentsStatus.script.status = 'pending'
+    } else {
+      agentsStatus.creative.progress = 100
+      agentsStatus.creative.status = 'completed'
+      agentsStatus.script.progress = Math.min((p - 50) * 4, 100)
+      agentsStatus.script.status = agentsStatus.script.progress >= 100 ? 'completed' : 'in_progress'
+    }
+    agentsStatus.scheduler.progress = p
+    agentsStatus.scheduler.status = p >= 100 ? 'completed' : 'in_progress'
   }
 }
 
-// 处理进度更新
 const handleProgressUpdate = (data) => {
   if (data.overall_progress !== undefined) {
     progress.value = data.overall_progress
+    updateAgentsStatus(data)
   }
 
   if (data.updates && Array.isArray(data.updates)) {
     progressUpdates.value = data.updates
+  }
+
+  if (data.elapsed_time !== undefined) {
+    elapsedTime.value = data.elapsed_time
+  }
+
+  if (data.estimated_remaining_time !== undefined) {
+    estimatedRemainingTime.value = data.estimated_remaining_time
+  }
+
+  if (data.message) {
+    addExecutionLog(data.message)
+  }
+
+  if (data.content) {
+    addContent(data)
   }
 
   if (data.status) {
@@ -601,7 +646,6 @@ const handleProgressUpdate = (data) => {
   }
 }
 
-// 获取状态类型
 const getStatusType = (status) => {
   const types = {
     completed: 'success',
@@ -612,7 +656,6 @@ const getStatusType = (status) => {
   return types[status] || 'info'
 }
 
-// 获取状态文本
 const getStatusText = (status) => {
   const texts = {
     completed: '已完成',
@@ -623,45 +666,56 @@ const getStatusText = (status) => {
   return texts[status] || status
 }
 
-// 获取优先级类型
 const getPriorityType = (priority) => {
   if (priority >= 4) return 'danger'
   if (priority >= 3) return 'warning'
   return 'primary'
 }
 
-// 模拟进度增长
-const simulateProgress = () => {
-  const interval = setInterval(() => {
-    if (progress.value < 100 && loading.value) {
-      progress.value += Math.random() * 15
-      if (progress.value > 100) progress.value = 100
-    } else {
-      clearInterval(interval)
-    }
-  }, 1000)
+const getContentTypeTag = (type) => {
+  const types = {
+    'outline': 'primary',
+    'character': 'success',
+    'plot': 'warning',
+    'scene': 'danger',
+    'dialogue': 'info',
+    'default': ''
+  }
+  return types[type] || ''
 }
 
-// 处理表单提交
+const getContentTypeLabel = (type) => {
+  const labels = {
+    'outline': '大纲',
+    'character': '人物',
+    'plot': '情节',
+    'scene': '场景',
+    'dialogue': '对话',
+    'default': '内容'
+  }
+  return labels[type] || '内容'
+}
+
+const resetUI = () => {
+  progress.value = 0
+  elapsedTime.value = 0
+  estimatedRemainingTime.value = 0
+  executionLogs.value = []
+  contentList.value = []
+  agentsStatus.creative = { progress: 0, status: 'pending' }
+  agentsStatus.script = { progress: 0, status: 'pending' }
+  agentsStatus.scheduler = { progress: 0, status: 'pending' }
+}
+
 const handleSubmit = async () => {
   const valid = await formRef.value.validate().catch(() => false)
   if (!valid) return
 
   loading.value = true
   showResult.value = false
-  progress.value = 0
-
-  // 保存会话ID
-  sessionIdRef.value = formData.session_id
-
-  // 建立WebSocket连接
-  connectWebSocket(formData.session_id)
-
-  // 开始模拟进度
-  simulateProgress()
+  resetUI()
 
   try {
-    // 真实API调用
     const response = await api.post(endpoints.scheduler.schedule, {
       story_description: formData.story_description,
       story_type: formData.story_type,
@@ -669,6 +723,10 @@ const handleSubmit = async () => {
       session_id: formData.session_id,
       model: formData.model,
     })
+    
+    // API 调用成功后再连接 WebSocket
+    const backendBaseUrl = import.meta.env.DEV ? 'localhost:8000' : null
+    await websocketService.connect(formData.session_id, backendBaseUrl)
 
     const result = {
       response: response.response || '故事创作任务调度成功',
@@ -704,7 +762,6 @@ const handleSubmit = async () => {
     console.error('调度任务失败:', error)
     ElMessage.error('调度任务失败，请重试')
 
-    // 使用模拟数据
     const mockResult = {
       response: '故事创作任务调度成功',
       session_id: formData.session_id,
@@ -763,14 +820,35 @@ const handleSubmit = async () => {
   }
 }
 
-// 组件挂载时生成会话ID
 onMounted(() => {
   formData.session_id = generateSessionId()
+  
+  websocketService.on('onOpen', () => {
+    wsConnected.value = true
+    wsError.value = null
+  })
+  
+  websocketService.on('onMessage', (data) => {
+    console.log('收到WebSocket消息:', data)
+    handleProgressUpdate(data)
+  })
+  
+  websocketService.on('onClose', () => {
+    wsConnected.value = false
+  })
+  
+  websocketService.on('onError', (error) => {
+    wsError.value = error.message || 'WebSocket连接错误'
+  })
+  
+  websocketService.on('onStateChange', ({ newState }) => {
+    console.log('WebSocket状态变化:', newState)
+    wsConnected.value = newState === 'connected'
+  })
 })
 
-// 组件卸载时关闭WebSocket
 onUnmounted(() => {
-  disconnectWebSocket()
+  websocketService.disconnect()
 })
 </script>
 
@@ -878,9 +956,43 @@ onUnmounted(() => {
   box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
 }
 
-/* 进度卡片样式 */
 .progress-content {
   padding: 20px 0;
+}
+
+.time-info-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  padding: 20px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 12px;
+  margin-bottom: 24px;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.time-item {
+  text-align: center;
+  color: white;
+}
+
+.time-label {
+  font-size: 14px;
+  opacity: 0.9;
+  margin-bottom: 4px;
+}
+
+.time-value {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.time-divider {
+  width: 1px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .overall-progress {
@@ -972,15 +1084,185 @@ onUnmounted(() => {
   color: #8c8c8c;
 }
 
+.agent-status-text.status-in_progress {
+  color: #409eff;
+}
+
+.agent-status-text.status-completed {
+  color: #67c23a;
+}
+
+.agent-status-text.status-failed {
+  color: #f56c6c;
+}
+
 .task-timeline {
   margin-bottom: 24px;
+}
+
+.execution-logs {
+  margin-bottom: 24px;
+}
+
+.logs-container {
+  background-color: #1e1e1e;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.logs-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.logs-container::-webkit-scrollbar-track {
+  background: #2d2d2d;
+  border-radius: 3px;
+}
+
+.logs-container::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 3px;
+}
+
+.log-item {
+  display: flex;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #333;
+}
+
+.log-item:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  color: #888;
+  font-size: 12px;
+  min-width: 70px;
+  flex-shrink: 0;
+}
+
+.log-content {
+  color: #d4d4d4;
+  font-size: 13px;
+  flex: 1;
+}
+
+.no-logs {
+  color: #666;
+  text-align: center;
+  padding: 20px;
+}
+
+.content-display {
+  margin-bottom: 24px;
+}
+
+.content-container {
+  background-color: #f5f7fa;
+  border-radius: 8px;
+  padding: 16px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.content-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.content-container::-webkit-scrollbar-track {
+  background: #e0e0e0;
+  border-radius: 3px;
+}
+
+.content-container::-webkit-scrollbar-thumb {
+  background: #999;
+  border-radius: 3px;
+}
+
+.content-item {
+  background-color: white;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+  border-left: 4px solid #dcdfe6;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.content-item:last-child {
+  margin-bottom: 0;
+}
+
+.content-item.content-type-outline {
+  border-left-color: #409eff;
+}
+
+.content-item.content-type-character {
+  border-left-color: #67c23a;
+}
+
+.content-item.content-type-plot {
+  border-left-color: #e6a23c;
+}
+
+.content-item.content-type-scene {
+  border-left-color: #f56c6c;
+}
+
+.content-item.content-type-dialogue {
+  border-left-color: #909399;
+}
+
+.content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.content-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.content-title {
+  font-weight: 500;
+  color: #262626;
+}
+
+.content-time {
+  font-size: 12px;
+  color: #8c8c8c;
+}
+
+.content-body {
+  max-height: 150px;
+  overflow: hidden;
+  position: relative;
+}
+
+.content-preview {
+  font-size: 14px;
+  color: #595959;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.no-content {
+  color: #999;
+  text-align: center;
+  padding: 40px;
 }
 
 .status-info {
   margin-top: 24px;
 }
 
-/* 结果卡片样式 */
 .result-content {
   padding: 20px 0;
 }
@@ -1017,7 +1299,6 @@ onUnmounted(() => {
   font-size: 18px;
 }
 
-/* 旋转动画 */
 .rotating {
   animation: rotate 1s linear infinite;
 }
@@ -1027,7 +1308,6 @@ onUnmounted(() => {
   to { transform: rotate(360deg); }
 }
 
-/* 响应式 */
 @media (max-width: 768px) {
   .scheduler {
     padding: 12px;
@@ -1035,6 +1315,16 @@ onUnmounted(() => {
   
   .page-title {
     font-size: 20px;
+  }
+
+  .time-info-card {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .time-divider {
+    width: 60px;
+    height: 1px;
   }
 }
 </style>

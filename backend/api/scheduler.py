@@ -21,11 +21,61 @@ router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 # 存储会话进度的内存存储（实际生产环境应使用Redis等持久化存储）
 session_progress_store: Dict[str, Dict[str, Any]] = {}
 
-# WebSocket连接管理器
+# WebSocket连接管理器（增强版）
 class ConnectionManager:
+    """
+    增强型WebSocket连接管理器
+    
+    特性：
+    - 心跳检测机制（自动清理死连接）
+    - 连接超时处理
+    - 连接状态监控
+    - 改进的错误处理和连接清理
+    """
+    
     def __init__(self):
-        # 存储活动的WebSocket连接，格式: {session_id: {"websockets": Set[WebSocket], "last_progress": Dict}}
+        # 存储活动的WebSocket连接，格式: {session_id: {"websockets": Set[WebSocket], "last_progress": Dict, "last_heartbeat": datetime}}
         self.active_connections: Dict[str, Dict[str, Any]] = {}
+        # 心跳超时时间（秒）
+        self.heartbeat_timeout = 60
+        # 启动心跳检测任务
+        self._start_heartbeat_checker()
+    
+    def _start_heartbeat_checker(self):
+        """启动心跳检测定时任务"""
+        async def heartbeat_checker():
+            while True:
+                await asyncio.sleep(30)  # 每30秒检查一次
+                await self._check_heartbeats()
+        
+        # 创建后台任务
+        asyncio.create_task(heartbeat_checker())
+        logger.info("心跳检测任务已启动")
+    
+    async def _check_heartbeats(self):
+        """检查所有连接的心跳，清理超时连接"""
+        current_time = datetime.now()
+        sessions_to_remove = []
+        
+        for session_id, connection_data in self.active_connections.items():
+            last_heartbeat = connection_data.get("last_heartbeat", current_time)
+            elapsed = (current_time - last_heartbeat).total_seconds()
+            
+            # 如果超时，清理连接
+            if elapsed > self.heartbeat_timeout:
+                logger.warning(f"会话 {session_id} 心跳超时，清理连接")
+                websockets = list(connection_data["websockets"])
+                for ws in websockets:
+                    try:
+                        await ws.close()
+                    except:
+                        pass
+                sessions_to_remove.append(session_id)
+        
+        # 移除超时会话
+        for session_id in sessions_to_remove:
+            if session_id in self.active_connections:
+                del self.active_connections[session_id]
     
     async def connect(self, websocket: WebSocket, session_id: str):
         """
@@ -40,15 +90,29 @@ class ConnectionManager:
         if session_id not in self.active_connections:
             self.active_connections[session_id] = {
                 "websockets": set(),
-                "last_progress": None
+                "last_progress": None,
+                "last_heartbeat": datetime.now(),
+                "connected_at": datetime.now()
             }
         
         self.active_connections[session_id]["websockets"].add(websocket)
-        logger.info(f"WebSocket连接已建立: session_id={session_id}")
+        self.active_connections[session_id]["last_heartbeat"] = datetime.now()
+        
+        logger.info(f"WebSocket连接已建立: session_id={session_id}, 当前连接数: {len(self.active_connections[session_id]['websockets'])}")
+        
+        # 发送连接确认消息
+        await self.send_personal_message({
+            "type": "connection_established",
+            "session_id": session_id,
+            "message": "WebSocket连接已成功建立",
+            "timestamp": datetime.now().isoformat()
+        }, websocket)
         
         # 发送当前进度（如果有）
         if session_id in session_progress_store:
-            await self.send_personal_message(session_progress_store[session_id], websocket)
+            progress_data = session_progress_store[session_id].copy()
+            progress_data["type"] = "progress_update"
+            await self.send_personal_message(progress_data, websocket)
     
     def disconnect(self, websocket: WebSocket, session_id: str):
         """
@@ -60,11 +124,13 @@ class ConnectionManager:
         """
         if session_id in self.active_connections:
             self.active_connections[session_id]["websockets"].discard(websocket)
-            logger.info(f"WebSocket连接已断开: session_id={session_id}")
+            remaining = len(self.active_connections[session_id]["websockets"])
+            logger.info(f"WebSocket连接已断开: session_id={session_id}, 剩余连接数: {remaining}")
             
             # 如果没有连接了，清理
-            if not self.active_connections[session_id]["websockets"]:
+            if remaining == 0:
                 del self.active_connections[session_id]
+                logger.info(f"会话 {session_id} 的所有连接已断开，清理会话数据")
     
     async def send_personal_message(self, message: Dict[str, Any], websocket: WebSocket):
         """
@@ -78,31 +144,106 @@ class ConnectionManager:
             await websocket.send_json(message)
         except Exception as e:
             logger.error(f"发送消息失败: {str(e)}")
+            # 标记连接为断开
+            raise
     
     async def broadcast_progress(self, session_id: str, progress_data: Dict[str, Any]):
         """
-        广播进度更新
+        广播进度更新（增强版）
         
         Args:
             session_id: 会话ID
             progress_data: 进度数据
         """
+        if session_id not in self.active_connections:
+            return
+        
+        # 确保进度数据包含必要字段
+        enhanced_progress = self._enhance_progress_data(progress_data, session_id)
+        
+        # 更新最后进度
+        self.active_connections[session_id]["last_progress"] = enhanced_progress
+        
+        # 发送给所有连接的客户端
+        disconnected_websockets = []
+        for connection in list(self.active_connections[session_id]["websockets"]):
+            try:
+                await connection.send_json(enhanced_progress)
+            except Exception as e:
+                logger.error(f"广播消息失败: {str(e)}")
+                disconnected_websockets.append(connection)
+        
+        # 清理断开的连接
+        for websocket in disconnected_websockets:
+            self.disconnect(websocket, session_id)
+    
+    def _enhance_progress_data(self, progress_data: Dict[str, Any], session_id: str) -> Dict[str, Any]:
+        """
+        增强进度数据，添加时间估算等字段
+        
+        Args:
+            progress_data: 原始进度数据
+            session_id: 会话ID
+            
+        Returns:
+            增强后的进度数据
+        """
+        enhanced = progress_data.copy()
+        
+        # 确保类型字段
+        if "type" not in enhanced:
+            enhanced["type"] = "progress_update"
+        
+        # 添加会话ID
+        enhanced["session_id"] = session_id
+        
+        # 添加时间戳
+        if "timestamp" not in enhanced:
+            enhanced["timestamp"] = datetime.now().isoformat()
+        
+        # 计算预计剩余时间
+        if "overall_progress" in enhanced and enhanced["overall_progress"] > 0:
+            if session_id in session_progress_store:
+                start_time_str = session_progress_store[session_id].get("start_time")
+                if start_time_str:
+                    try:
+                        start_time = datetime.fromisoformat(start_time_str)
+                        elapsed = (datetime.now() - start_time).total_seconds()
+                        progress = enhanced["overall_progress"]
+                        
+                        # 估算总时间 = 已用时间 / 进度百分比
+                        if progress > 0:
+                            estimated_total = elapsed / (progress / 100)
+                            remaining = estimated_total - elapsed
+                            enhanced["estimated_remaining_time"] = int(remaining)
+                            enhanced["elapsed_time"] = int(elapsed)
+                    except:
+                        pass
+        
+        return enhanced
+    
+    def update_heartbeat(self, session_id: str):
+        """更新会话心跳时间"""
         if session_id in self.active_connections:
-            # 更新最后进度
-            self.active_connections[session_id]["last_progress"] = progress_data
-            
-            # 发送给所有连接的客户端
-            disconnected_websockets = []
-            for connection in self.active_connections[session_id]["websockets"]:
-                try:
-                    await connection.send_json(progress_data)
-                except Exception as e:
-                    logger.error(f"广播消息失败: {str(e)}")
-                    disconnected_websockets.append(connection)
-            
-            # 清理断开的连接
-            for websocket in disconnected_websockets:
-                self.disconnect(websocket, session_id)
+            self.active_connections[session_id]["last_heartbeat"] = datetime.now()
+    
+    def get_connection_stats(self) -> Dict[str, Any]:
+        """获取连接统计信息"""
+        stats = {
+            "total_sessions": len(self.active_connections),
+            "total_connections": sum(len(data["websockets"]) for data in self.active_connections.values()),
+            "sessions": []
+        }
+        
+        for session_id, data in self.active_connections.items():
+            stats["sessions"].append({
+                "session_id": session_id,
+                "connection_count": len(data["websockets"]),
+                "connected_at": data.get("connected_at", "").isoformat() if isinstance(data.get("connected_at"), datetime) else data.get("connected_at", ""),
+                "last_heartbeat": data.get("last_heartbeat", "").isoformat() if isinstance(data.get("last_heartbeat"), datetime) else data.get("last_heartbeat", "")
+            })
+        
+        return stats
 
 
 # 创建连接管理器实例
@@ -445,7 +586,13 @@ async def update_task_progress(task_id: str, progress_data: Dict[str, Any]):
 @router.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
     """
-    WebSocket端点，用于实时推送进度更新
+    WebSocket端点，用于实时推送进度更新（增强版）
+    
+    支持：
+    - 心跳检测（ping/pong）
+    - 连接状态管理
+    - 任务查询
+    - 进度同步
     
     Args:
         websocket: WebSocket连接对象
@@ -456,20 +603,40 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     try:
         # 持续监听消息
         while True:
-            # 接收消息（可选，这里我们主要是推送消息）
+            # 接收消息
             data = await websocket.receive_text()
             logger.info(f"收到WebSocket消息: session_id={session_id}, data={data}")
             
-            # 可以根据需要处理客户端发送的消息
+            # 处理客户端发送的消息
             if data == "ping":
-                await manager.send_personal_message({"type": "pong"}, websocket)
+                # 心跳检测 - 更新心跳时间并响应pong
+                manager.update_heartbeat(session_id)
+                await manager.send_personal_message({
+                    "type": "pong",
+                    "timestamp": datetime.now().isoformat()
+                }, websocket)
+            
+            elif data == "get_progress":
+                # 获取当前进度
+                if session_id in session_progress_store:
+                    progress_data = session_progress_store[session_id].copy()
+                    progress_data["type"] = "progress_update"
+                    await manager.send_personal_message(progress_data, websocket)
+                else:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": "会话不存在或未开始处理"
+                    }, websocket)
+            
             elif data.startswith("get_tasks"):
                 # 获取会话的所有任务
                 tasks = storage.get_by_session(session_id)
                 await manager.send_personal_message({
                     "type": "tasks",
-                    "tasks": [task.to_dict() for task in tasks]
+                    "tasks": [task.to_dict() for task in tasks],
+                    "timestamp": datetime.now().isoformat()
                 }, websocket)
+            
             elif data.startswith("get_task:"):
                 # 获取特定任务
                 task_id = data.split(":")[1]
@@ -477,17 +644,38 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 if task:
                     await manager.send_personal_message({
                         "type": "task",
-                        "task": task.to_dict()
+                        "task": task.to_dict(),
+                        "timestamp": datetime.now().isoformat()
                     }, websocket)
                 else:
                     await manager.send_personal_message({
                         "type": "error",
-                        "message": "任务不存在"
+                        "message": "任务不存在",
+                        "timestamp": datetime.now().isoformat()
                     }, websocket)
+            
+            elif data == "get_stats":
+                # 获取连接统计信息
+                stats = manager.get_connection_stats()
+                await manager.send_personal_message({
+                    "type": "connection_stats",
+                    "stats": stats,
+                    "timestamp": datetime.now().isoformat()
+                }, websocket)
+            
+            else:
+                # 未知命令
+                await manager.send_personal_message({
+                    "type": "error",
+                    "message": f"未知命令: {data}",
+                    "timestamp": datetime.now().isoformat()
+                }, websocket)
+                
     except WebSocketDisconnect:
+        logger.info(f"WebSocket连接断开: session_id={session_id}")
         manager.disconnect(websocket, session_id)
     except Exception as e:
-        logger.error(f"WebSocket错误: {str(e)}")
+        logger.error(f"WebSocket错误: session_id={session_id}, error={str(e)}")
         manager.disconnect(websocket, session_id)
 
 

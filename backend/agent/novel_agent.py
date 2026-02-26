@@ -254,3 +254,294 @@ class NovelWritingAgent:
             "full_novel": full_novel,
             "quality_evaluation": quality_evaluation
         }
+
+    # ============================================
+    # 小说剧本创作新方法
+    # ============================================
+
+    async def write_chapter_script(self, chapter_context) -> Dict[str, Any]:
+        """
+        创作章节剧本 - 基于完整上下文创作剧本格式的章节
+        
+        这是小说剧本创作智能体的核心方法，接收完整的创作上下文，
+        输出包含场景、对话、动作指示的剧本格式内容。
+        
+        Args:
+            chapter_context: ChapterContext 对象，包含：
+                - chapter_overview: 当前章节概述
+                - character_memories: 人物记忆（加权）
+                - previous_chapters_summary: 前文摘要
+                - style_guide: 风格指南
+                
+        Returns:
+            ChapterScript 对象的字典表示
+        """
+        from .models import ChapterScript, Scene
+        
+        chapter_number = chapter_context.chapter_number
+        chapter_overview = chapter_context.chapter_overview
+        character_memories = chapter_context.character_memories
+        previous_summary = chapter_context.previous_chapters_summary
+        style_guide = chapter_context.style_guide
+        
+        print(f"  [剧本创作] 开始创作第{chapter_number}章剧本...")
+        
+        # 构建人物记忆提示
+        character_prompts = []
+        for char_name, char_memory in character_memories.items():
+            weighted = char_memory.get_weighted_memories(chapter_number)
+            char_prompt = f"""
+角色：{char_name}
+核心特质：{weighted['core_traits']}
+近期经历：{', '.join([e['event'] for e in weighted['recent_experiences']])}
+重要过往：{', '.join([e['event'] for e in weighted['important_past']])}
+关系网络：{weighted['relationships']}
+"""
+            character_prompts.append(char_prompt)
+        
+        # 构建前文摘要提示
+        previous_prompt = ""
+        if previous_summary:
+            previous_prompt = "前文关键信息：\n" + "\n".join([f"- {s}" for s in previous_summary[-3:]])  # 最近3章
+        
+        # 构建风格指南提示
+        style = style_guide.get("style", "urban")
+        style_description = self.writing_styles.get(style, self.writing_styles["urban"])
+        tone = style_guide.get("emotional_tone", "根据情节自然发展")
+        
+        # 主提示词
+        prompt = f"""你是一位专业的小说剧本创作专家。请基于以下信息创作第{chapter_number}章的完整剧本：
+
+【章节概述】
+{chapter_overview}
+
+【人物记忆与状态】
+{chr(10).join(character_prompts)}
+
+{previous_prompt}
+
+【风格要求】
+文风：{style_description}
+情感基调：{tone}
+
+【剧本格式要求】
+请按照以下JSON格式输出剧本内容：
+
+{{
+    "chapter_title": "章节标题",
+    "scenes": [
+        {{
+            "scene_id": "scene_1",
+            "setting": "场景描述：时间、地点、环境氛围",
+            "characters_present": ["角色A", "角色B"],
+            "dialogues": [
+                {{"speaker": "角色A", "content": "对话内容", "emotion": "情感状态", "action": "伴随动作"}},
+                {{"speaker": "角色B", "content": "对话内容", "emotion": "情感状态", "action": "伴随动作"}}
+            ],
+            "actions": "场景中的动作指示和描写",
+            "emotional_tone": "本场景的情感基调",
+            "plot_progression": "本场景推动的情节发展点"
+        }}
+    ],
+    "key_events": ["关键事件1", "关键事件2"],
+    "character_development": {{"角色A": "本章节该角色的成长或变化", "角色B": "本章节该角色的成长或变化"}},
+    "emotional_arc": "本章节的情感弧线描述"
+}}
+
+【创作要求】
+1. 场景划分清晰，每个场景有明确的目的和情节推进
+2. 对话符合角色性格和当前记忆状态
+3. 动作指示具体，便于可视化呈现
+4. 情感描写细腻，体现人物内心变化
+5. 确保与人物记忆和前文信息保持一致
+6. 章节结尾设置悬念或过渡，为下一章铺垫
+7. 字数控制在1500-2500字之间
+
+请直接输出JSON格式的剧本内容，确保格式正确可解析。"""
+
+        try:
+            # 调用LLM生成剧本
+            script_content = await self.llm.generate(prompt)
+            
+            print(f"  [剧本创作] 收到LLM响应，长度: {len(script_content)}")
+            
+            # 尝试提取JSON - 清理markdown标记等
+            import json
+            import re
+            
+            # 清理响应，提取JSON部分
+            json_match = re.search(r'(\{[\s\S]*\})', script_content)
+            if json_match:
+                script_content = json_match.group(1)
+            
+            # 移除可能的markdown代码块标记
+            script_content = script_content.replace('```json', '').replace('```', '').strip()
+            
+            # 解析JSON响应
+            script_data = json.loads(script_content)
+            
+            # 创建ChapterScript对象
+            chapter_script = ChapterScript(
+                chapter_number=chapter_number,
+                chapter_title=script_data.get("chapter_title", f"第{chapter_number}章"),
+                overview=chapter_overview
+            )
+            
+            # 添加场景
+            for scene_data in script_data.get("scenes", []):
+                scene = Scene(
+                    scene_id=scene_data.get("scene_id", f"scene_{len(chapter_script.scenes)+1}"),
+                    setting=scene_data.get("setting", ""),
+                    characters_present=scene_data.get("characters_present", []),
+                    dialogues=scene_data.get("dialogues", []),
+                    actions=scene_data.get("actions", ""),
+                    emotional_tone=scene_data.get("emotional_tone", ""),
+                    plot_progression=scene_data.get("plot_progression", "")
+                )
+                chapter_script.add_scene(scene)
+            
+            # 设置其他属性
+            chapter_script.key_events = script_data.get("key_events", [])
+            chapter_script.character_development = script_data.get("character_development", {})
+            chapter_script.emotional_arc = script_data.get("emotional_arc", "")
+            
+            print(f"  [剧本创作] 第{chapter_number}章完成，共{len(chapter_script.scenes)}个场景，{chapter_script.word_count}字")
+            
+            return {
+                "success": True,
+                "chapter_script": chapter_script.to_dict(),
+                "chapter_number": chapter_number
+            }
+            
+        except Exception as e:
+            print(f"  [剧本创作] 第{chapter_number}章创作失败: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "chapter_number": chapter_number
+            }
+
+    async def extract_chapter_key_info(self, chapter_script) -> Dict[str, Any]:
+        """
+        提取章节关键信息摘要
+        
+        用于传递给后续章节作为上下文
+        
+        Args:
+            chapter_script: ChapterScript 对象
+            
+        Returns:
+            关键信息摘要
+        """
+        chapter_number = chapter_script.chapter_number
+        chapter_title = chapter_script.chapter_title
+        key_events = chapter_script.key_events
+        character_development = chapter_script.character_development
+        
+        # 构建摘要
+        summary = f"第{chapter_number}章《{chapter_title}》："
+        summary += f"关键事件：{', '.join(key_events)}；"
+        summary += f"角色发展：{', '.join([f'{k}({v})' for k, v in character_development.items()])}"
+        
+        return {
+            "chapter_number": chapter_number,
+            "chapter_title": chapter_title,
+            "summary": summary,
+            "key_events": key_events,
+            "character_development": character_development,
+            "emotional_arc": chapter_script.emotional_arc
+        }
+
+    async def check_script_consistency(self, chapter_script, character_memories, previous_summaries) -> Dict[str, Any]:
+        """
+        检查剧本一致性
+        
+        检查剧本内容是否与人物记忆和前文信息保持一致
+        
+        Args:
+            chapter_script: ChapterScript 对象
+            character_memories: 人物记忆字典
+            previous_summaries: 前文摘要列表
+            
+        Returns:
+            一致性检查结果
+        """
+        issues = []
+        warnings = []
+        
+        # 1. 检查角色行为一致性
+        for char_name, development in chapter_script.character_development.items():
+            if char_name in character_memories:
+                char_memory = character_memories[char_name]
+                core_traits = char_memory.long_term_memory.get("core_traits", "")
+                
+                # 简单检查：如果角色发展描述与核心特质完全无关，发出警告
+                # 实际实现中可以使用LLM进行更复杂的语义分析
+                if core_traits and len(development) > 10:
+                    # 这里简化处理，实际应该调用LLM判断
+                    pass
+        
+        # 2. 检查情节连贯性
+        if previous_summaries:
+            last_summary = previous_summaries[-1]
+            # 检查本章关键事件是否与前文逻辑连贯
+            # 简化处理，实际应该调用LLM判断
+            pass
+        
+        # 3. 检查场景完整性
+        for i, scene in enumerate(chapter_script.scenes):
+            if not scene.dialogues and not scene.actions:
+                issues.append(f"场景{i+1}缺少对话和动作")
+            if not scene.characters_present:
+                warnings.append(f"场景{i+1}未指定在场角色")
+        
+        is_consistent = len(issues) == 0
+        
+        return {
+            "is_consistent": is_consistent,
+            "issues": issues,
+            "warnings": warnings,
+            "chapter_number": chapter_script.chapter_number
+        }
+
+    async def update_character_memories_from_script(self, chapter_script, character_memories) -> Dict[str, Any]:
+        """
+        根据剧本内容更新人物记忆
+        
+        Args:
+            chapter_script: ChapterScript 对象
+            character_memories: 当前人物记忆字典
+            
+        Returns:
+            更新后的人物记忆字典
+        """
+        chapter_number = chapter_script.chapter_number
+        
+        # 为每个在本章有发展的角色添加经历
+        for char_name, development in chapter_script.character_development.items():
+            if char_name in character_memories:
+                char_memory = character_memories[char_name]
+                
+                # 添加本章经历
+                event_description = f"第{chapter_number}章：{development}"
+                
+                # 判断影响程度（简化逻辑：根据描述长度和关键词）
+                impact = "high" if any(kw in development for kw in ["重大", "转折", "决定", "改变"]) else "medium"
+                
+                char_memory.add_experience(event_description, chapter_number, impact)
+                
+                print(f"  [记忆更新] {char_name}：添加经历（{impact}影响）")
+        
+        # 检查场景中的角色互动，更新关系
+        for scene in chapter_script.scenes:
+            chars = scene.characters_present
+            if len(chars) >= 2:
+                # 简化处理：如果两个角色同时出现在场景中，认为他们有互动
+                for i, char1 in enumerate(chars):
+                    for char2 in chars[i+1:]:
+                        if char1 in character_memories and char2 in character_memories:
+                            # 更新双向关系（简化处理）
+                            character_memories[char1].update_relationship(char2, "互动")
+                            character_memories[char2].update_relationship(char1, "互动")
+        
+        return character_memories

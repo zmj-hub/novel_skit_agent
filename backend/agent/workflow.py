@@ -478,8 +478,9 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timedelta
 import asyncio
 import uuid
-from .models import TaskProgress, Anomaly
-from .storage import storage
+import traceback
+from .models import TaskProgress, Anomaly, StepExecutionReport
+from .storage import storage, report_storage
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -530,32 +531,46 @@ async def validate_workflow(adapted_workflow: Dict[str, Any]) -> Tuple[bool, Opt
 
 
 async def execute_workflow_step(
-    step: Dict[str, Any], 
-    state: Dict[str, Any], 
+    step: Dict[str, Any],
+    state: Dict[str, Any],
     step_index: int,
     total_steps: int
 ) -> Dict[str, Any]:
     """
-    执行单个工作流步骤
-    
+    执行单个工作流步骤，并将执行结果保存到报告文件中
+
     Args:
         step: 工作流步骤
         state: 当前状态
         step_index: 步骤索引
         total_steps: 总步骤数
-        
+
     Returns:
         Dict[str, Any]: 执行结果
     """
     step_name = step.get("name", f"step_{step_index}")
     step_type = step.get("type", "generic")
     step_params = step.get("params", {})
-    
+
+    # 获取任务和会话信息
+    task_id = state.get("task_id", f"task_{uuid.uuid4()}")
+    session_id = state.get("session_id", "")
+
     logger.info(f"开始执行步骤 {step_index + 1}/{total_steps}: {step_name} (类型: {step_type})")
-    
+
+    # 创建步骤执行报告对象
+    report = StepExecutionReport(
+        task_id=task_id,
+        session_id=session_id,
+        step_name=step_name,
+        step_type=step_type,
+        step_index=step_index,
+        total_steps=total_steps
+    )
+
     # 记录步骤开始时间
     start_time = datetime.now()
-    
+
     try:
         # 根据步骤类型执行不同的逻辑
         if step_type == "creative_planning":
@@ -563,17 +578,17 @@ async def execute_workflow_step(
             from agent.creative_agent import CreativePlanningAgent
             model = state.get("model", settings.DEFAULT_MODEL)
             agent = CreativePlanningAgent(model)
-            
+
             # 执行创意策划逻辑
             result = await agent.analyze_hotspots(step_params.get("hotspots", []))
             logger.info(f"创意策划步骤执行完成: {step_name}")
-            
+
         elif step_type == "novel_writing":
             # 执行小说创作步骤
             from agent.novel_agent import NovelWritingAgent
             model = state.get("model", settings.DEFAULT_MODEL)
             agent = NovelWritingAgent(model)
-            
+
             # 执行小说创作逻辑
             result = await agent.write_chapter(
                 step_params.get("chapter_outline", ""),
@@ -581,26 +596,26 @@ async def execute_workflow_step(
                 step_params.get("chapter_number", step_index + 1)
             )
             logger.info(f"小说创作步骤执行完成: {step_name}")
-            
+
         elif step_type == "quality_evaluation":
             # 执行质量评估步骤
             from agent.novel_agent import NovelWritingAgent
             model = state.get("model", settings.DEFAULT_MODEL)
             agent = NovelWritingAgent(model)
-            
+
             # 执行质量评估逻辑
             content = step_params.get("content", state.get("full_novel", ""))
             result = await agent.evaluate_content_quality(content)
             logger.info(f"质量评估步骤执行完成: {step_name}")
-            
+
         else:
             # 通用步骤执行逻辑 - 调用LLM生成内容
             logger.info(f"执行通用步骤: {step_name}")
-            
+
             # 获取LLM实例
             model = state.get("model", settings.DEFAULT_MODEL)
             llm = llm_manager.get_llm(model)
-            
+
             # 构建提示词
             story_type = state.get("story_type", "未知")
             story_description = state.get("story_description", "")
@@ -611,7 +626,7 @@ async def execute_workflow_step(
 
 请提供详细的执行结果，包括具体的创作内容、分析和建议。
 """
-            
+
             # 调用LLM生成结果
             try:
                 result_text = await llm.generate(prompt)
@@ -630,13 +645,23 @@ async def execute_workflow_step(
                     "status": "failed",
                     "error": str(e)
                 }
-        
+
         # 记录步骤结束时间
         end_time = datetime.now()
         execution_time = (end_time - start_time).total_seconds()
-        
+
+        # 标记报告为完成状态
+        report.mark_completed(result)
+
+        # 保存执行报告到文件
+        report_file_path = report_storage.save_step_report(report)
+        if report_file_path:
+            logger.info(f"步骤执行报告已保存: {report_file_path}")
+        else:
+            logger.warning(f"步骤执行报告保存失败: {step_name}")
+
         logger.info(f"步骤 {step_name} 执行完成，耗时: {execution_time:.2f}秒")
-        
+
         return {
             "step_name": step_name,
             "step_type": step_type,
@@ -644,17 +669,31 @@ async def execute_workflow_step(
             "result": result,
             "execution_time": execution_time,
             "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat()
+            "end_time": end_time.isoformat(),
+            "report_id": report.report_id,
+            "report_file": report_file_path
         }
-        
+
     except Exception as e:
         # 记录步骤执行错误
         end_time = datetime.now()
         execution_time = (end_time - start_time).total_seconds()
-        
+
         error_message = str(e)
+        error_stack_trace = traceback.format_exc()
         logger.error(f"步骤 {step_name} 执行失败: {error_message}")
-        
+        logger.error(f"错误堆栈: {error_stack_trace}")
+
+        # 标记报告为失败状态
+        report.mark_failed(error_message, error_stack_trace)
+
+        # 保存执行报告到文件（即使失败也要保存）
+        report_file_path = report_storage.save_step_report(report)
+        if report_file_path:
+            logger.info(f"步骤执行报告（失败）已保存: {report_file_path}")
+        else:
+            logger.warning(f"步骤执行报告（失败）保存失败: {step_name}")
+
         return {
             "step_name": step_name,
             "step_type": step_type,
@@ -662,7 +701,9 @@ async def execute_workflow_step(
             "error": error_message,
             "execution_time": execution_time,
             "start_time": start_time.isoformat(),
-            "end_time": end_time.isoformat()
+            "end_time": end_time.isoformat(),
+            "report_id": report.report_id,
+            "report_file": report_file_path
         }
 
 
@@ -928,225 +969,895 @@ async def execute_workflow_node(state: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-async def generate_reports_node(state: Dict[str, Any]) -> Dict[str, Any]:
+# ============================================
+# 新智能体协调工作流 - 精简版（5个核心节点）
+# ============================================
+
+async def planning_and_scheduling_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    生成报告节点
-    """
-    schedule = state.get('schedule')
-    conflict_detection = state.get('conflict_detection')
-    conflict_resolution = state.get('conflict_resolution')
-    resource_allocations = state.get('resource_allocations')
-    adapted_workflow = state.get('adapted_workflow')
-    task_plan = state.get('task_plan')
-    task_breakdown = state.get('task_breakdown')
-    agent_allocation = state.get('agent_allocation')
-    progress_tracking = state.get('progress_tracking')
-    result_summary = state.get('result_summary')
-    model = state.get('model', settings.DEFAULT_MODEL)
+    节点1: 智能规划与调度
     
-    print("Generating scheduling logs and exception reports...")
+    整合原 task_planning + task_breakdown + create_schedule + agent_allocation
+    根据故事类型和内容动态生成执行计划，智能分配智能体
+    """
+    story_description = state.get('story_description', '')
+    story_type = state.get('story_type', '')
+    request_priority = state.get('request_priority', 1)
+    model = state.get('model', settings.DEFAULT_MODEL)
+    session_id = state.get('session_id', '')
+    
+    print(f"=" * 60)
+    print(f"节点1: 智能规划与调度")
+    print(f"Story Type: {story_type}, Priority: {request_priority}")
+    print(f"=" * 60)
+    
+    # 更新进度回调
+    progress_callback = state.get('progress_callback')
+    if progress_callback:
+        await progress_callback({
+            "status": "planning",
+            "message": "正在进行智能规划与调度...",
+            "overall_progress": 5,
+            "content": f"故事类型: {story_type}\n故事描述: {story_description[:100]}..."
+        })
     
     try:
         agent = CoordinationSchedulerAgent(model)
-        scheduling_log = await agent.generate_scheduling_log(schedule, resource_allocations, adapted_workflow)
-        exception_report = await agent.generate_exception_report(conflict_detection, conflict_resolution)
-        # 返回包含原始状态的数据
+        
+        # 使用新的动态规划方法
+        execution_plan = await agent.dynamic_planning(
+            story_description=story_description,
+            story_type=story_type,
+            request_priority=request_priority
+        )
+        
+        # 记录执行元数据
+        execution_metadata = {
+            "start_time": datetime.now().isoformat(),
+            "steps_completed": 0,
+            "total_steps": execution_plan.get("total_steps", 0),
+            "milestones": [{"event": "planning_completed", "time": datetime.now().isoformat()}]
+        }
+        
         result = state.copy()
-        result["scheduling_log"] = scheduling_log
-        result["exception_report"] = exception_report
-        result["response"] = "Reports generated successfully"
-        result["processed_at"] = datetime.now().isoformat()
+        result["execution_plan"] = execution_plan
+        result["execution_metadata"] = execution_metadata
+        result["response"] = f"动态规划完成: {execution_plan.get('plan_summary', '')}"
+        
+        print(f"✓ 规划完成: {execution_plan.get('total_steps', 0)} 个步骤")
+        
+        # 提取执行计划摘要
+        plan_summary = execution_plan.get('plan_summary', '')
+        steps_info = f"计划步骤: {execution_plan.get('total_steps', 0)}个"
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "planning_completed",
+                "message": f"规划完成，共{execution_plan.get('total_steps', 0)}个步骤",
+                "overall_progress": 10,
+                "execution_plan": execution_plan,
+                "content": f"{plan_summary}\n{steps_info}"
+            })
+        
         return result
+        
     except Exception as e:
-        print(f"Warning: Failed to generate reports: {e}")
-        # 返回包含原始状态的数据
+        print(f"✗ 规划失败: {e}")
         result = state.copy()
-        result["scheduling_log"] = {"log_entries": [], "generated_at": "Error", "total_steps": 0, "included_steps": 0, "skipped_steps": 0}
-        result["exception_report"] = {"exceptions": [], "generated_at": "Error", "total_exceptions": 0, "resolved_exceptions": 0, "unresolved_exceptions": 0}
-        result["response"] = "Error generating reports"
-        result["processed_at"] = datetime.now().isoformat()
+        result["execution_plan"] = {
+            "plan_id": "error",
+            "story_type": story_type,
+            "steps": [],
+            "total_steps": 0,
+            "plan_summary": f"规划失败: {str(e)}"
+        }
+        result["execution_metadata"] = {"error": str(e)}
         return result
 
 
-async def task_planning_node(state: Dict[str, Any]) -> Dict[str, Any]:
+async def creative_execution_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    任务规划节点
+    节点2: 创意策划执行
+    
+    执行创意策划工作流，包括热点分析、故事框架构建、媒介适配
     """
     story_description = state.get('story_description', '')
     story_type = state.get('story_type', '')
     model = state.get('model', settings.DEFAULT_MODEL)
+    execution_plan = state.get('execution_plan', {})
     
-    print(f"Planning task for story: {story_type}")
-    print(f"Story description: {story_description[:100]}...")
+    print(f"\n{'=' * 60}")
+    print(f"节点2: 创意策划执行")
+    print(f"{'=' * 60}")
+    
+    progress_callback = state.get('progress_callback')
+    if progress_callback:
+        await progress_callback({
+            "status": "creative_executing",
+            "message": "正在执行创意策划...",
+            "overall_progress": 15
+        })
     
     try:
-        agent = CoordinationSchedulerAgent(model)
-        task_plan = await agent.plan_story_task(story_description, story_type)
-        # 返回包含原始状态的数据
+        # 检查是否需要创意策划步骤
+        steps = execution_plan.get('steps', [])
+        has_creative_step = any(s.get('step_type') == 'creative_planning' for s in steps)
+        
+        if not has_creative_step:
+            print("ℹ 执行计划中无需创意策划步骤，跳过")
+            result = state.copy()
+            result["creative_framework"] = {"skipped": True, "reason": "No creative planning step in execution plan"}
+            return result
+        
+        # 执行创意策划
+        agent = CreativePlanningAgent(model)
+        
+        # 1. 热点分析（可选）
+        hotspots = state.get('hotspots', [])
+        if hotspots:
+            print("→ 执行热点分析...")
+            hotspots_analysis = await agent.analyze_hotspots(hotspots)
+        else:
+            hotspots_analysis = {"hotspots": [], "analysis": "未提供热点元素"}
+        
+        # 提取热点分析内容
+        hotspots_content = hotspots_analysis.get('analysis', '')
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "hotspots_analyzed",
+                "message": "热点分析完成",
+                "overall_progress": 20,
+                "content": hotspots_content
+            })
+        
+        # 2. 故事框架构建
+        print("→ 构建故事框架...")
+        story_framework = await agent.build_story_framework(hotspots_analysis, story_type)
+        
+        # 提取故事框架内容
+        framework_content = f"主题: {story_framework.get('theme', '')}\n"
+        framework_content += f"背景: {story_framework.get('setting', '')}\n"
+        framework_content += f"核心冲突: {story_framework.get('core_conflict', '')}\n"
+        characters = story_framework.get('characters', [])
+        if characters:
+            framework_content += f"主要人物: {', '.join([char.get('name', '') for char in characters[:3]])}"
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "framework_built",
+                "message": "故事框架构建完成",
+                "overall_progress": 25,
+                "content": framework_content
+            })
+        
+        # 3. 媒介适配
+        print("→ 执行媒介适配...")
+        media_adaptation = await agent.adapt_to_media(story_framework)
+        
+        # 整合创意框架
+        creative_framework = {
+            "hotspots_analysis": hotspots_analysis,
+            "story_framework": story_framework,
+            "media_adaptation": media_adaptation,
+            "creative_document": await agent.generate_creative_document(
+                hotspots_analysis, story_framework, media_adaptation
+            )
+        }
+        
         result = state.copy()
-        result["task_plan"] = task_plan
+        result["creative_framework"] = creative_framework
+        result["response"] = "创意策划执行完成"
+        
+        # 更新执行元数据
+        if "execution_metadata" in result:
+            result["execution_metadata"]["steps_completed"] = 1
+            result["execution_metadata"]["milestones"].append({
+                "event": "creative_completed",
+                "time": datetime.now().isoformat()
+            })
+        
+        print(f"✓ 创意策划完成")
+        
+        # 提取创意文档内容
+        creative_doc_content = creative_framework.get('creative_document', {}).get('document', '')
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "creative_completed",
+                "message": "创意策划执行完成",
+                "overall_progress": 30,
+                "creative_framework": creative_framework,
+                "content": creative_doc_content
+            })
+        
         return result
+        
     except Exception as e:
-        print(f"Warning: Failed to plan story task: {e}")
-        # 返回包含原始状态的数据
+        print(f"✗ 创意策划失败: {e}")
         result = state.copy()
-        result["task_plan"] = {"story_type": story_type, "plan": "Error", "estimated_duration": 0}
+        result["creative_framework"] = {"error": str(e)}
         return result
 
 
-async def task_breakdown_node(state: Dict[str, Any]) -> Dict[str, Any]:
+async def content_writing_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    任务拆解节点
+    节点3: 小说剧本创作执行（增强版）
+    
+    基于多智能体协作的小说剧本创作流程：
+    1. 初始化人物记忆数据库
+    2. 按章节循环创作，每章整合人物记忆和前文信息
+    3. 一致性检查确保内容连贯
+    4. 实时更新人物记忆
+    5. 记录章节关键信息供后续使用
+    
+    核心特性：
+    - 人物记忆管理（长期/短期记忆）
+    - 跨章节内容一致性保障
+    - 剧本格式输出（场景、对话、动作）
     """
-    task_plan = state.get('task_plan')
+    from .models import CharacterMemory, ChapterContext, ChapterScript, StoryBlueprint
+    
+    creative_framework = state.get('creative_framework', {})
+    story_type = state.get('story_type', '')
+    style = state.get('style', 'urban')
+    chapter_count = state.get('chapter_count', 5)
     model = state.get('model', settings.DEFAULT_MODEL)
     
-    print("Breaking down task into subtasks...")
+    print(f"\n{'=' * 60}")
+    print(f"节点3: 小说剧本创作执行（多智能体协作版）")
+    print(f"Style: {style}, Chapters: {chapter_count}")
+    print(f"{'=' * 60}")
+    
+    progress_callback = state.get('progress_callback')
+    if progress_callback:
+        await progress_callback({
+            "status": "writing",
+            "message": "正在初始化小说剧本创作系统...",
+            "overall_progress": 35
+        })
     
     try:
-        agent = CoordinationSchedulerAgent(model)
-        task_breakdown = await agent.breakdown_task(task_plan)
-        # 返回包含原始状态的数据
+        agent = NovelWritingAgent(model)
+        
+        # ========================================
+        # 阶段1: 初始化人物记忆数据库
+        # ========================================
+        print("→ 阶段1: 初始化人物记忆数据库...")
+        
+        # 从创意框架中提取人物信息
+        story_framework = creative_framework.get('story_framework', {})
+        characters_data = story_framework.get('characters', [])
+        
+        # 如果框架中没有人物信息，创建默认人物
+        if not characters_data:
+            characters_data = [
+                {"name": "主角", "role": "protagonist", "background": "普通背景", "personality": "坚韧、善良", "goals": "实现目标"},
+                {"name": "配角A", "role": "supporting", "background": "辅助背景", "personality": "聪明、忠诚", "goals": "帮助主角"}
+            ]
+        
+        # 创建人物记忆数据库
+        character_memories: Dict[str, CharacterMemory] = {}
+        for char_data in characters_data:
+            char_name = char_data.get('name', '未知角色')
+            basic_info = {
+                "background": char_data.get('background', ''),
+                "personality": char_data.get('personality', ''),
+                "goals": char_data.get('goals', ''),
+                "role": char_data.get('role', 'supporting')
+            }
+            char_memory = CharacterMemory(
+                character_id=f"char_{char_name}",
+                name=char_name,
+                basic_info=basic_info
+            )
+            character_memories[char_name] = char_memory
+            print(f"  [人物记忆] 初始化: {char_name} ({basic_info['role']})")
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "memories_initialized",
+                "message": f"人物记忆数据库初始化完成，共{len(character_memories)}个角色",
+                "overall_progress": 38,
+                "characters": list(character_memories.keys())
+            })
+        
+        # ========================================
+        # 阶段2: 准备故事蓝图
+        # ========================================
+        print("→ 阶段2: 准备故事蓝图...")
+        
+        # 构建章节概述列表
+        chapter_overviews = []
+        for i in range(1, chapter_count + 1):
+            # 从创意框架获取章节信息，或使用默认
+            chapter_info = creative_framework.get('chapters', {}).get(f'chapter_{i}', {})
+            overview = chapter_info.get('overview', f'第{i}章：推进故事情节')
+            chapter_overviews.append({
+                "number": i,
+                "title": chapter_info.get('title', f'第{i}章'),
+                "overview": overview
+            })
+        
+        # 构建风格指南
+        style_guide = {
+            "style": style,
+            "emotional_tone": story_framework.get('emotional_tone', '根据情节自然发展'),
+            "writing_style_description": agent.writing_styles.get(style, agent.writing_styles["urban"])
+        }
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "blueprint_ready",
+                "message": "故事蓝图准备完成",
+                "overall_progress": 40
+            })
+        
+        # ========================================
+        # 阶段3: 章节循环创作
+        # ========================================
+        print(f"→ 阶段3: 开始章节循环创作 ({chapter_count}章)...")
+        
+        chapter_scripts: List[Dict[str, Any]] = []
+        previous_chapters_summary: List[str] = []
+        consistency_issues: List[Dict[str, Any]] = []
+        
+        for i in range(1, chapter_count + 1):
+            print(f"\n  [{'='*20}] 创作第{i}/{chapter_count}章 [{'='*20}]")
+            
+            # 获取当前章节概述
+            current_overview = chapter_overviews[i-1]["overview"]
+            
+            # 3.1 准备创作上下文
+            print(f"  [上下文准备] 整合人物记忆和前文信息...")
+            
+            # 构建章节创作上下文
+            chapter_context = ChapterContext(
+                chapter_number=i,
+                chapter_overview=current_overview,
+                story_blueprint={
+                    "total_chapters": chapter_count,
+                    "style": style,
+                    "theme": story_framework.get('theme', story_type)
+                },
+                character_memories=character_memories,
+                previous_chapters_summary=previous_chapters_summary,
+                style_guide=style_guide
+            )
+            
+            # 3.2 创作章节剧本
+            print(f"  [剧本创作] 调用小说剧本创作智能体...")
+            
+            # 发送进度更新 - 开始创作
+            chapter_start_progress = 40 + int(((i - 1) / chapter_count) * 30)
+            if progress_callback:
+                await progress_callback({
+                    "status": "writing_chapter",
+                    "message": f"正在创作第{i}/{chapter_count}章...",
+                    "overall_progress": chapter_start_progress,
+                    "current_chapter": i,
+                    "chapter_title": chapter_overviews[i-1]["title"],
+                    "content": f"开始创作第{i}章"
+                })
+            
+            script_result = await agent.write_chapter_script(chapter_context)
+            
+            if not script_result.get('success'):
+                print(f"  ✗ 第{i}章创作失败: {script_result.get('error')}")
+                # 记录错误但继续尝试下一章
+                consistency_issues.append({
+                    "chapter": i,
+                    "type": "creation_error",
+                    "message": script_result.get('error')
+                })
+                continue
+            
+            chapter_script_data = script_result.get('chapter_script', {})
+            
+            # 发送进度更新 - 剧本初步创作完成，展示部分内容
+            chapter_mid_progress = 40 + int(((i - 0.5) / chapter_count) * 30)
+            # 提取部分内容用于展示
+            preview_content = ""
+            scenes = chapter_script_data.get('scenes', [])
+            if scenes:
+                first_scene = scenes[0]
+                preview_content = f"{first_scene.get('setting', '')}\n{first_scene.get('actions', '')[:200]}..."
+            
+            if progress_callback:
+                await progress_callback({
+                    "status": "chapter_draft_completed",
+                    "message": f"第{i}/{chapter_count}章初稿完成",
+                    "overall_progress": chapter_mid_progress,
+                    "current_chapter": i,
+                    "chapter_title": chapter_script_data.get('chapter_title', f'第{i}章'),
+                    "content": preview_content
+                })
+            
+            # 创建ChapterScript对象用于后续处理
+            chapter_script = ChapterScript(
+                chapter_number=i,
+                chapter_title=chapter_script_data.get('chapter_title', f'第{i}章'),
+                overview=current_overview
+            )
+            
+            # 3.3 一致性检查
+            print(f"  [一致性检查] 验证剧本连贯性...")
+            
+            if progress_callback:
+                await progress_callback({
+                    "status": "checking_consistency",
+                    "message": f"正在检查第{i}/{chapter_count}章一致性...",
+                    "overall_progress": chapter_mid_progress + 1,
+                    "current_chapter": i,
+                    "content": "正在进行内容一致性检查"
+                })
+            
+            consistency_result = await agent.check_script_consistency(
+                chapter_script, character_memories, previous_chapters_summary
+            )
+            
+            if not consistency_result.get('is_consistent'):
+                issues = consistency_result.get('issues', [])
+                warnings = consistency_result.get('warnings', [])
+                print(f"  ⚠ 发现{len(issues)}个问题，{len(warnings)}个警告")
+                
+                consistency_issues.extend([{
+                    "chapter": i,
+                    "type": "consistency_issue",
+                    "message": issue
+                } for issue in issues])
+                
+                # 如果问题严重，可以在这里暂停或重试
+                # 简化处理：记录问题但继续
+            
+            # 3.4 更新人物记忆
+            print(f"  [记忆更新] 根据剧本内容更新人物记忆...")
+            
+            # 从剧本数据中提取角色发展信息
+            char_development = chapter_script_data.get('character_development', {})
+            for char_name, development in char_development.items():
+                if char_name in character_memories:
+                    char_memory = character_memories[char_name]
+                    event = f"第{i}章：{development}"
+                    impact = "high" if any(kw in development for kw in ["重大", "转折", "决定", "改变"]) else "medium"
+                    char_memory.add_experience(event, i, impact)
+            
+            # 更新关系网络（基于场景中的角色共现）
+            scenes = chapter_script_data.get('scenes', [])
+            for scene in scenes:
+                chars = scene.get('characters_present', [])
+                for j, char1 in enumerate(chars):
+                    for char2 in chars[j+1:]:
+                        if char1 in character_memories and char2 in character_memories:
+                            character_memories[char1].update_relationship(char2, "互动")
+                            character_memories[char2].update_relationship(char1, "互动")
+            
+            # 3.5 提取关键信息摘要
+            print(f"  [信息摘要] 提取本章关键信息...")
+            
+            key_info = {
+                "chapter_number": i,
+                "chapter_title": chapter_script_data.get('chapter_title', f'第{i}章'),
+                "summary": f"第{i}章：{', '.join(chapter_script_data.get('key_events', []))}",
+                "key_events": chapter_script_data.get('key_events', []),
+                "character_development": char_development,
+                "emotional_arc": chapter_script_data.get('emotional_arc', '')
+            }
+            previous_chapters_summary.append(key_info['summary'])
+            
+            # 保存章节剧本
+            chapter_scripts.append(chapter_script_data)
+            
+            # 更新进度
+            chapter_progress = 40 + int((i / chapter_count) * 30)
+            
+            # 提取章节完整内容用于展示
+            chapter_content = f"【{chapter_script_data.get('chapter_title', f'第{i}章')}】\n\n"
+            for scene in chapter_script_data.get('scenes', []):
+                chapter_content += f"【场景】{scene.get('setting', '')}\n"
+                chapter_content += f"{scene.get('actions', '')}\n"
+                for dialogue in scene.get('dialogues', []):
+                    chapter_content += f"\n{dialogue.get('speaker', '')}：{dialogue.get('content', '')}\n"
+            
+            if progress_callback:
+                await progress_callback({
+                    "status": "chapter_script_completed",
+                    "message": f"第{i}/{chapter_count}章剧本创作完成",
+                    "overall_progress": chapter_progress,
+                    "current_chapter": i,
+                    "chapter_title": chapter_script_data.get('chapter_title'),
+                    "scene_count": len(chapter_script_data.get('scenes', [])),
+                    "word_count": chapter_script_data.get('word_count', 0),
+                    "content": chapter_content
+                })
+            
+            print(f"  ✓ 第{i}章完成: {len(chapter_script_data.get('scenes', []))}个场景")
+        
+        # ========================================
+        # 阶段4: 整合结果
+        # ========================================
+        print(f"\n{'=' * 60}")
+        print("阶段4: 整合创作结果")
+        print(f"{'=' * 60}")
+        
+        # 计算总字数
+        total_word_count = sum(s.get('word_count', 0) for s in chapter_scripts)
+        
+        # 构建最终的小说内容结构
+        novel_content = {
+            "chapter_scripts": chapter_scripts,
+            "total_chapters": len(chapter_scripts),
+            "word_count": total_word_count,
+            "character_memories": {name: mem.to_dict() for name, mem in character_memories.items()},
+            "consistency_issues": consistency_issues,
+            "style": style,
+            "chapter_count": chapter_count
+        }
+        
+        # 生成传统格式的小说文本（用于兼容）
+        full_novel_parts = []
+        for script in chapter_scripts:
+            chapter_text = f"\n\n{'='*40}\n{script.get('chapter_title', '')}\n{'='*40}\n\n"
+            for scene in script.get('scenes', []):
+                chapter_text += f"\n【场景】{scene.get('setting', '')}\n"
+                chapter_text += f"{scene.get('actions', '')}\n"
+                for dialogue in scene.get('dialogues', []):
+                    chapter_text += f"\n{dialogue.get('speaker', '')}：{dialogue.get('content', '')}\n"
+            full_novel_parts.append(chapter_text)
+        
+        full_novel = "\n".join(full_novel_parts)
+        novel_content["full_novel"] = full_novel
+        
         result = state.copy()
-        result["task_breakdown"] = task_breakdown
+        result["novel_content"] = novel_content
+        result["response"] = f"小说剧本创作完成，共{len(chapter_scripts)}章，{total_word_count}字"
+        
+        # 更新执行元数据
+        if "execution_metadata" in result:
+            result["execution_metadata"]["steps_completed"] = 2
+            result["execution_metadata"]["milestones"].append({
+                "event": "script_writing_completed",
+                "time": datetime.now().isoformat(),
+                "chapters_completed": len(chapter_scripts),
+                "total_word_count": total_word_count
+            })
+        
+        print(f"✓ 小说剧本创作完成: {len(chapter_scripts)}章, {total_word_count}字")
+        print(f"  - 人物记忆: {len(character_memories)}个角色")
+        print(f"  - 一致性问题: {len(consistency_issues)}个")
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "writing_completed",
+                "message": f"小说剧本创作完成，共{total_word_count}字",
+                "overall_progress": 70,
+                "word_count": total_word_count,
+                "chapter_count": len(chapter_scripts),
+                "character_count": len(character_memories),
+                "consistency_issues": len(consistency_issues)
+            })
+        
         return result
+        
     except Exception as e:
-        print(f"Warning: Failed to breakdown task: {e}")
-        # 返回包含原始状态的数据
+        print(f"✗ 小说剧本创作失败: {e}")
+        import traceback
+        traceback.print_exc()
         result = state.copy()
-        result["task_breakdown"] = {"subtasks": [], "breakdown_at": "Error"}
+        result["novel_content"] = {"error": str(e), "chapters": [], "full_novel": ""}
         return result
 
 
-async def agent_allocation_node(state: Dict[str, Any]) -> Dict[str, Any]:
+async def quality_evaluation_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    智能体分配节点
+    节点4: 质量评估与决策
+    
+    评估内容质量，决定是否通过或需要返回优化
+    支持迭代优化（最多3次）
     """
-    task_breakdown = state.get('task_breakdown')
+    novel_content = state.get('novel_content', {})
     model = state.get('model', settings.DEFAULT_MODEL)
     
-    print("Allocating subtasks to agents...")
+    # 获取当前迭代次数
+    revision_count = state.get('revision_count', 0)
+    max_revisions = state.get('max_revisions', 3)
+    quality_threshold = state.get('quality_threshold', 75.0)
+    
+    print(f"\n{'=' * 60}")
+    print(f"节点4: 质量评估与决策")
+    print(f"迭代次数: {revision_count}/{max_revisions}, 阈值: {quality_threshold}")
+    print(f"{'=' * 60}")
+    
+    progress_callback = state.get('progress_callback')
+    if progress_callback:
+        await progress_callback({
+            "status": "evaluating",
+            "message": "正在进行质量评估...",
+            "overall_progress": 75
+        })
     
     try:
-        agent = CoordinationSchedulerAgent(model)
-        agent_allocation = await agent.allocate_tasks_to_agents(task_breakdown)
-        # 返回包含原始状态的数据
+        full_novel = novel_content.get('full_novel', '')
+        
+        if not full_novel:
+            print("✗ 没有可评估的内容")
+            result = state.copy()
+            result["quality_report"] = {"error": "No content to evaluate"}
+            return result
+        
+        # 使用调度智能体进行质量评估
+        scheduler_agent = CoordinationSchedulerAgent(model)
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "evaluating_content",
+                "message": "正在分析内容质量...",
+                "overall_progress": 78,
+                "content": "正在对生成的内容进行全面质量评估，包括故事连贯性、人物一致性、文笔风格等方面"
+            })
+        
+        quality_report = await scheduler_agent.evaluate_and_decide(
+            content=full_novel,
+            content_type="novel",
+            quality_threshold=quality_threshold
+        )
+        
         result = state.copy()
-        result["agent_allocation"] = agent_allocation
+        result["quality_report"] = quality_report
+        result["revision_count"] = revision_count
+        
+        # 决策逻辑
+        if quality_report.get('needs_revision') and revision_count < max_revisions:
+            # 需要优化且未达到最大迭代次数
+            print(f"⚠ 质量未达标 (score: {quality_report.get('overall_score')}), 需要优化")
+            print(f"  建议: {quality_report.get('suggestions', [])}")
+            
+            result["needs_revision"] = True
+            result["revision_count"] = revision_count + 1
+            result["response"] = f"质量评估完成，需要优化 (第{revision_count + 1}次迭代)"
+            
+            # 构建优化建议内容
+            revision_content = f"质量评分: {quality_report.get('overall_score')}分\n\n优化建议:\n"
+            suggestions = quality_report.get('suggestions', [])
+            for idx, suggestion in enumerate(suggestions[:3], 1):
+                revision_content += f"{idx}. {suggestion}\n"
+            
+            if progress_callback:
+                await progress_callback({
+                    "status": "needs_revision",
+                    "message": f"质量评估: {quality_report.get('overall_score')}分，需要优化",
+                    "overall_progress": 80,
+                    "quality_report": quality_report,
+                    "revision_count": revision_count + 1,
+                    "content": revision_content
+                })
+        else:
+            # 通过评估或已达到最大迭代次数
+            if quality_report.get('needs_revision'):
+                print(f"⚠ 质量未达标但已达到最大迭代次数，强制通过")
+            else:
+                print(f"✓ 质量评估通过 (score: {quality_report.get('overall_score')})")
+            
+            result["needs_revision"] = False
+            result["response"] = f"质量评估完成，评分: {quality_report.get('overall_score')}"
+            
+            # 更新执行元数据
+            if "execution_metadata" in result:
+                result["execution_metadata"]["steps_completed"] = 3
+                result["execution_metadata"]["milestones"].append({
+                    "event": "quality_evaluated",
+                    "time": datetime.now().isoformat(),
+                    "score": quality_report.get('overall_score')
+                })
+            
+            # 构建质量报告内容
+            quality_content = f"✅ 质量评估通过\n"
+            quality_content += f"综合评分: {quality_report.get('overall_score')}分\n\n"
+            quality_content += f"详细评价:\n"
+            for key, value in quality_report.items():
+                if key not in ['needs_revision', 'overall_score', 'suggestions'] and value:
+                    quality_content += f"- {key}: {value}\n"
+            
+            if progress_callback:
+                await progress_callback({
+                    "status": "quality_passed",
+                    "message": f"质量评估通过: {quality_report.get('overall_score')}分",
+                    "overall_progress": 85,
+                    "quality_report": quality_report,
+                    "content": quality_content
+                })
+        
         return result
+        
     except Exception as e:
-        print(f"Warning: Failed to allocate tasks to agents: {e}")
-        # 返回包含原始状态的数据
+        print(f"✗ 质量评估失败: {e}")
         result = state.copy()
-        result["agent_allocation"] = {"allocations": [], "allocated_at": "Error"}
+        result["quality_report"] = {"error": str(e), "overall_score": 0}
+        result["needs_revision"] = False
         return result
 
 
-async def progress_tracking_node(state: Dict[str, Any]) -> Dict[str, Any]:
+async def result_integration_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    进度跟踪节点
+    节点5: 结果整合与报告
+    
+    整合所有执行结果，生成最终报告和日志
     """
-    agent_allocation = state.get('agent_allocation')
+    creative_framework = state.get('creative_framework', {})
+    novel_content = state.get('novel_content', {})
+    quality_report = state.get('quality_report', {})
+    execution_metadata = state.get('execution_metadata', {})
+    execution_plan = state.get('execution_plan', {})
     model = state.get('model', settings.DEFAULT_MODEL)
     
-    print("Tracking task progress...")
+    print(f"\n{'=' * 60}")
+    print(f"节点5: 结果整合与报告")
+    print(f"{'=' * 60}")
+    
+    progress_callback = state.get('progress_callback')
+    if progress_callback:
+            await progress_callback({
+                "status": "integrating",
+                "message": "正在整合结果...",
+                "overall_progress": 90,
+                "content": "正在将创意框架、小说内容、质量评估等所有结果整合为最终报告"
+            })
     
     try:
-        agent = CoordinationSchedulerAgent(model)
-        progress_tracking = await agent.track_task_progress(agent_allocation)
-        # 返回包含原始状态的数据
+        # 使用调度智能体整合结果
+        scheduler_agent = CoordinationSchedulerAgent(model)
+        final_result = await scheduler_agent.integrate_results(
+            creative_framework=creative_framework,
+            novel_content=novel_content,
+            quality_report=quality_report,
+            execution_metadata=execution_metadata
+        )
+        
+        # 构建调度器响应格式的输出
+        response = final_result.get('response', '工作流执行完成')
+        
+        # 构建兼容的schedule结构
+        workflow_schedule = {
+            "schedule": execution_plan.get('steps', []),
+            "created_at": execution_plan.get('created_at', datetime.now().isoformat()),
+            "total_duration": execution_plan.get('estimated_duration', 0)
+        }
+        
+        # 构建兼容的log结构
+        workflow_log = {
+            "log_entries": execution_metadata.get('milestones', []),
+            "generated_at": datetime.now().isoformat(),
+            "total_steps": execution_plan.get('total_steps', 0),
+            "included_steps": execution_metadata.get('steps_completed', 0),
+            "skipped_steps": execution_plan.get('total_steps', 0) - execution_metadata.get('steps_completed', 0)
+        }
+        
+        # 构建兼容的exception_report结构
+        exception_report = {
+            "exceptions": [],
+            "generated_at": datetime.now().isoformat(),
+            "total_exceptions": 0,
+            "resolved_exceptions": 0,
+            "unresolved_exceptions": 0
+        }
+        
         result = state.copy()
-        result["progress_tracking"] = progress_tracking
+        result.update({
+            "response": response,
+            "schedule": workflow_schedule,
+            "scheduling_log": workflow_log,
+            "exception_report": exception_report,
+            "final_result": final_result,
+            "processed_at": datetime.now().isoformat()
+        })
+        
+        print(f"✓ 结果整合完成")
+        print(f"  字数: {final_result.get('execution_summary', {}).get('word_count', 0)}")
+        print(f"  质量分: {final_result.get('execution_summary', {}).get('quality_score', 0)}")
+        print(f"  耗时: {final_result.get('execution_summary', {}).get('total_time_seconds', 0):.1f}秒")
+        
+        # 构建最终结果内容
+        final_content = f"🎉 工作流执行完成!\n\n"
+        execution_summary = final_result.get('execution_summary', {})
+        final_content += f"总字数: {execution_summary.get('word_count', 0)}\n"
+        final_content += f"质量分: {execution_summary.get('quality_score', 0)}\n"
+        final_content += f"总耗时: {execution_summary.get('total_time_seconds', 0):.1f}秒\n"
+        final_content += f"章节数: {novel_content.get('total_chapters', 0)}"
+        
+        if progress_callback:
+            await progress_callback({
+                "status": "completed",
+                "message": "工作流执行完成",
+                "overall_progress": 100,
+                "final_result": final_result,
+                "content": final_content
+            })
+        
         return result
+        
     except Exception as e:
-        print(f"Warning: Failed to track task progress: {e}")
-        # 返回包含原始状态的数据
+        print(f"✗ 结果整合失败: {e}")
         result = state.copy()
-        result["progress_tracking"] = {"progress": 0, "status": "Error", "tracking_at": "Error"}
-        return result
-
-
-async def result_summary_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    结果汇总节点
-    """
-    progress_tracking = state.get('progress_tracking')
-    model = state.get('model', settings.DEFAULT_MODEL)
-    
-    print("Summarizing task results...")
-    
-    try:
-        agent = CoordinationSchedulerAgent(model)
-        result_summary = await agent.summarize_task_results(progress_tracking)
-        # 返回包含原始状态的数据
-        result = state.copy()
-        result["result_summary"] = result_summary
-        result["response"] = "Task completed successfully"
-        return result
-    except Exception as e:
-        print(f"Warning: Failed to summarize task results: {e}")
-        # 返回包含原始状态的数据
-        result = state.copy()
-        result["result_summary"] = {"summary": "Error", "completed_at": "Error"}
-        result["response"] = "Error summarizing task results"
+        result["response"] = f"结果整合失败: {str(e)}"
+        result["final_result"] = {"error": str(e)}
+        result["processed_at"] = datetime.now().isoformat()
         return result
 
 
 def create_scheduler_workflow():
     """
-    创建协同调度工作流
+    创建精简版协同调度工作流（5个核心节点）
     
-    此函数创建一个完整的协同调度工作流，用于管理和执行多智能体任务。
-    工作流包含任务规划、分解、智能体分配、执行、监控和报告生成等环节。
+    新工作流架构：
+    1. 智能规划与调度 - 动态生成执行计划
+    2. 创意策划执行 - 执行创意策划工作流
+    3. 内容创作执行 - 执行小说创作工作流
+    4. 质量评估与决策 - 评估质量，支持迭代优化
+    5. 结果整合与报告 - 整合结果生成最终报告
+    
+    改进点：
+    - 节点从10个减少到5个，降低复杂度
+    - 动态规划替代固定工作流
+    - 增加质量评估反馈循环
+    - 实时进度更新
     
     Returns:
-        CompiledStateGraph: 编译后的工作流对象，可直接用于执行
+        CompiledStateGraph: 编译后的工作流对象
     """
-    # 初始化工作流状态图，使用字典作为状态类型
+    # 初始化工作流状态图
     workflow = StateGraph(dict)
     
-    # 原有节点 - 调度核心功能
-    workflow.add_node("create_schedule", create_schedule_node)  # 创建任务调度计划
-    workflow.add_node("detect_conflicts", detect_conflicts_node)  # 检测任务冲突
-    workflow.add_node("allocate_resources", allocate_resources_node)  # 分配资源
+    # 添加5个核心节点
+    workflow.add_node("planning_and_scheduling", planning_and_scheduling_node)  # 节点1: 智能规划
+    workflow.add_node("creative_execution", creative_execution_node)            # 节点2: 创意策划
+    workflow.add_node("content_writing", content_writing_node)                  # 节点3: 内容创作
+    workflow.add_node("quality_evaluation", quality_evaluation_node)            # 节点4: 质量评估
+    workflow.add_node("result_integration", result_integration_node)            # 节点5: 结果整合
     
-    # 新增节点 - 增强功能模块
-    workflow.add_node("task_planning", task_planning_node)  # 任务整体规划
-    workflow.add_node("task_breakdown", task_breakdown_node)  # 任务分解为子任务
-    workflow.add_node("agent_allocation", agent_allocation_node)  # 智能体分配到具体任务
-    workflow.add_node("progress_tracking", progress_tracking_node)  # 任务执行进度跟踪
-    workflow.add_node("result_summary", result_summary_node)  # 任务结果汇总
+    # 设置入口点
+    workflow.set_entry_point("planning_and_scheduling")
     
-    # 原有节点 - 执行和报告
-    workflow.add_node("execute_workflow", execute_workflow_node)  # 执行工作流
-    workflow.add_node("generate_reports", generate_reports_node)  # 生成执行报告
+    # 基本流程边
+    workflow.add_edge("planning_and_scheduling", "creative_execution")
+    workflow.add_edge("creative_execution", "content_writing")
+    workflow.add_edge("content_writing", "quality_evaluation")
     
-    # 设置工作流执行流程
-    # 1. 开始于任务规划
-    workflow.set_entry_point("task_planning")
-    # 2. 任务规划 → 任务分解
-    workflow.add_edge("task_planning", "task_breakdown")
-    # 3. 任务分解 → 智能体分配
-    workflow.add_edge("task_breakdown", "agent_allocation")
-    # 4. 智能体分配 → 创建调度计划
-    workflow.add_edge("agent_allocation", "create_schedule")
-    # 5. 创建调度计划 → 检测冲突
-    workflow.add_edge("create_schedule", "detect_conflicts")
-    # 6. 检测冲突 → 分配资源
-    workflow.add_edge("detect_conflicts", "allocate_resources")
-    # 7. 分配资源 → 执行工作流
-    workflow.add_edge("allocate_resources", "execute_workflow")
-    # 8. 执行工作流 → 进度跟踪
-    workflow.add_edge("execute_workflow", "progress_tracking")
-    # 9. 进度跟踪 → 结果汇总
-    workflow.add_edge("progress_tracking", "result_summary")
-    # 10. 结果汇总 → 生成报告
-    workflow.add_edge("result_summary", "generate_reports")
-    # 11. 生成报告 → 工作流结束
-    workflow.add_edge("generate_reports", END)
+    # 条件边：质量评估后决定是继续还是返回优化
+    def quality_decision(state: Dict[str, Any]) -> str:
+        """
+        质量评估决策函数
+        
+        根据质量评估结果决定下一步：
+        - 需要优化且未达到最大迭代次数 -> 返回内容创作节点
+        - 通过评估或达到最大迭代次数 -> 继续到结果整合
+        """
+        needs_revision = state.get("needs_revision", False)
+        revision_count = state.get("revision_count", 0)
+        max_revisions = state.get("max_revisions", 3)
+        
+        if needs_revision and revision_count < max_revisions:
+            print(f"\n↻ 质量未达标，返回优化 (第{revision_count}次迭代)")
+            return "content_writing"  # 返回内容创作节点进行优化
+        else:
+            print(f"\n→ 质量评估通过，继续结果整合")
+            return "result_integration"
     
-    # 编译工作流并返回
+    # 添加条件边
+    workflow.add_conditional_edges(
+        "quality_evaluation",
+        quality_decision,
+        {
+            "content_writing": "content_writing",      # 需要优化，返回重写
+            "result_integration": "result_integration"  # 通过评估，继续
+        }
+    )
+    
+    # 结果整合后结束
+    workflow.add_edge("result_integration", END)
+    
+    # 编译工作流
     return workflow.compile()
 
 
+# 创建新的工作流实例
 scheduler_workflow = create_scheduler_workflow()

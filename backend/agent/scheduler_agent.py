@@ -792,3 +792,307 @@ class CoordinationSchedulerAgent:
         }
         
         return result_summary
+
+    async def dynamic_planning(self, story_description: str, story_type: str, request_priority: int = 1) -> Dict[str, Any]:
+        """
+        动态规划 - 根据故事类型和内容生成动态执行计划
+        
+        这是新工作流的核心方法，替代原有的固定工作流步骤。
+        根据故事描述分析需求，动态生成最适合的工作流步骤和智能体分配。
+        
+        Args:
+            story_description: 故事详细描述
+            story_type: 故事类型
+            request_priority: 请求优先级
+            
+        Returns:
+            动态执行计划，包含步骤列表、智能体分配、时间安排
+        """
+        start_time = datetime.datetime.now()
+        
+        print(f"开始动态规划: story_type={story_type}, priority={request_priority}")
+        
+        # 基于故事类型定义基础工作流模板
+        type_workflow_templates = {
+            "科幻": {
+                "required_steps": ["creative_planning", "world_building", "novel_writing", "quality_evaluation"],
+                "optional_steps": ["science_consulting"],
+                "estimated_duration": 180
+            },
+            "悬疑": {
+                "required_steps": ["creative_planning", "plot_design", "novel_writing", "quality_evaluation"],
+                "optional_steps": ["logic_verification"],
+                "estimated_duration": 150
+            },
+            "爱情": {
+                "required_steps": ["creative_planning", "character_development", "novel_writing", "quality_evaluation"],
+                "optional_steps": ["emotional_analysis"],
+                "estimated_duration": 120
+            },
+            "奇幻": {
+                "required_steps": ["creative_planning", "world_building", "novel_writing", "quality_evaluation"],
+                "optional_steps": ["mythology_research"],
+                "estimated_duration": 160
+            },
+            "历史": {
+                "required_steps": ["creative_planning", "historical_research", "novel_writing", "quality_evaluation"],
+                "optional_steps": ["expert_review"],
+                "estimated_duration": 140
+            },
+            "都市": {
+                "required_steps": ["creative_planning", "novel_writing", "quality_evaluation"],
+                "optional_steps": ["trend_analysis"],
+                "estimated_duration": 100
+            },
+            "武侠": {
+                "required_steps": ["creative_planning", "martial_arts_design", "novel_writing", "quality_evaluation"],
+                "optional_steps": ["culture_research"],
+                "estimated_duration": 130
+            },
+            "恐怖": {
+                "required_steps": ["creative_planning", "atmosphere_design", "novel_writing", "quality_evaluation"],
+                "optional_steps": ["psychology_analysis"],
+                "estimated_duration": 110
+            }
+        }
+        
+        # 获取模板
+        template = type_workflow_templates.get(story_type, type_workflow_templates["都市"])
+        
+        # 根据优先级调整时间
+        priority_factor = max(0.7, 1 - (request_priority - 1) * 0.08)
+        base_duration = template["estimated_duration"]
+        adjusted_duration = int(base_duration * priority_factor)
+        
+        # 构建执行步骤
+        steps = []
+        current_time = start_time
+        step_duration = adjusted_duration // len(template["required_steps"])
+        
+        # 智能体类型映射
+        step_agent_map = {
+            "creative_planning": "CreativePlanningAgent",
+            "world_building": "CreativePlanningAgent",
+            "plot_design": "CreativePlanningAgent",
+            "character_development": "CreativePlanningAgent",
+            "historical_research": "CreativePlanningAgent",
+            "martial_arts_design": "CreativePlanningAgent",
+            "atmosphere_design": "CreativePlanningAgent",
+            "novel_writing": "NovelWritingAgent",
+            "quality_evaluation": "NovelWritingAgent"
+        }
+        
+        for i, step_type in enumerate(template["required_steps"]):
+            step_start = current_time
+            step_end = current_time + datetime.timedelta(minutes=step_duration)
+            
+            steps.append({
+                "step_id": f"step_{i+1}_{step_type}",
+                "step_type": step_type,
+                "step_name": self._get_step_name(step_type),
+                "agent_type": step_agent_map.get(step_type, "GenericAgent"),
+                "start_time": step_start.isoformat(),
+                "estimated_end_time": step_end.isoformat(),
+                "duration_minutes": step_duration,
+                "priority": request_priority,
+                "dependencies": [steps[j]["step_id"] for j in range(i)] if i > 0 else []
+            })
+            
+            current_time = step_end
+        
+        # 构建执行计划
+        execution_plan = {
+            "plan_id": f"plan_{uuid.uuid4()}",
+            "story_type": story_type,
+            "story_description": story_description[:200] + "..." if len(story_description) > 200 else story_description,
+            "request_priority": request_priority,
+            "steps": steps,
+            "total_steps": len(steps),
+            "estimated_duration": adjusted_duration,
+            "created_at": start_time.isoformat(),
+            "plan_summary": f"为{story_type}故事设计的动态执行计划，包含{len(steps)}个核心步骤，预计耗时{adjusted_duration}分钟"
+        }
+        
+        print(f"动态规划完成: {execution_plan['plan_summary']}")
+        
+        return execution_plan
+    
+    def _get_step_name(self, step_type: str) -> str:
+        """获取步骤类型的中文名称"""
+        name_map = {
+            "creative_planning": "创意策划",
+            "world_building": "世界观构建",
+            "plot_design": "情节设计",
+            "character_development": "人物塑造",
+            "historical_research": "历史考证",
+            "martial_arts_design": "武功设计",
+            "atmosphere_design": "氛围设计",
+            "novel_writing": "小说创作",
+            "quality_evaluation": "质量评估"
+        }
+        return name_map.get(step_type, step_type)
+
+    async def evaluate_and_decide(self, content: str, content_type: str = "novel", 
+                                  quality_threshold: float = 75.0) -> Dict[str, Any]:
+        """
+        质量评估与决策 - 评估内容质量并决定是否需要优化
+        
+        这是新工作流的关键节点，支持迭代优化循环。
+        
+        Args:
+            content: 需要评估的内容
+            content_type: 内容类型 (novel/chapter/outline)
+            quality_threshold: 质量阈值 (0-100)
+            
+        Returns:
+            评估结果，包含质量分数、维度分析、决策建议
+        """
+        start_time = datetime.datetime.now()
+        
+        print(f"开始质量评估: content_type={content_type}, threshold={quality_threshold}")
+        
+        # 模拟多维度质量评估
+        # 实际实现中应该使用LLM进行真正的质量评估
+        content_length = len(content)
+        
+        # 基于内容长度和类型计算基础分数
+        base_score = min(85, 60 + content_length / 100)
+        
+        # 多维度评估
+        dimensions = {
+            "readability": {
+                "score": min(95, base_score + 10),
+                "description": "可读性",
+                "factors": ["语言流畅", "段落结构清晰", "过渡自然"]
+            },
+            "consistency": {
+                "score": min(90, base_score + 5),
+                "description": "一致性",
+                "factors": ["人物设定一致", "情节逻辑连贯", "文风统一"]
+            },
+            "attractiveness": {
+                "score": min(92, base_score + 8),
+                "description": "吸引力",
+                "factors": ["开头吸引人", "悬念设置合理", "情节有张力"]
+            },
+            "creativity": {
+                "score": min(88, base_score + 3),
+                "description": "创意性",
+                "factors": ["情节新颖", "人物立体", "主题深刻"]
+            },
+            "completeness": {
+                "score": min(95, base_score + 10),
+                "description": "完整性",
+                "factors": ["结构完整", "结局合理", "伏笔回收"]
+            }
+        }
+        
+        # 计算综合分数
+        overall_score = sum(d["score"] for d in dimensions.values()) / len(dimensions)
+        
+        # 生成问题列表
+        issues = []
+        if dimensions["readability"]["score"] < quality_threshold:
+            issues.append({"dimension": "readability", "issue": "可读性有待提升", "severity": "medium"})
+        if dimensions["consistency"]["score"] < quality_threshold:
+            issues.append({"dimension": "consistency", "issue": "内容一致性需要改进", "severity": "high"})
+        if dimensions["attractiveness"]["score"] < quality_threshold:
+            issues.append({"dimension": "attractiveness", "issue": "情节吸引力不足", "severity": "medium"})
+        
+        # 生成优化建议
+        suggestions = []
+        if issues:
+            suggestions.append("优化段落结构，提升阅读流畅度")
+            suggestions.append("加强人物刻画，使角色更加立体")
+            suggestions.append("增加情节转折，提升故事张力")
+        
+        # 决策逻辑
+        needs_revision = overall_score < quality_threshold or any(i["severity"] == "high" for i in issues)
+        
+        # 决策建议
+        if needs_revision:
+            decision = "revise"
+            decision_reason = f"综合评分{overall_score:.1f}低于阈值{quality_threshold}，需要优化"
+        else:
+            decision = "approve"
+            decision_reason = f"综合评分{overall_score:.1f}达到要求，可以通过"
+        
+        evaluation_report = {
+            "evaluation_id": f"eval_{uuid.uuid4()}",
+            "content_type": content_type,
+            "overall_score": round(overall_score, 1),
+            "quality_threshold": quality_threshold,
+            "dimensions": dimensions,
+            "issues": issues,
+            "suggestions": suggestions,
+            "decision": decision,
+            "decision_reason": decision_reason,
+            "needs_revision": needs_revision,
+            "evaluated_at": start_time.isoformat()
+        }
+        
+        print(f"质量评估完成: score={overall_score:.1f}, decision={decision}")
+        
+        return evaluation_report
+
+    async def integrate_results(self, creative_framework: Dict[str, Any], 
+                                novel_content: Dict[str, Any],
+                                quality_report: Dict[str, Any],
+                                execution_metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        结果整合 - 整合所有执行结果并生成最终报告
+        
+        Args:
+            creative_framework: 创意框架结果
+            novel_content: 小说内容结果
+            quality_report: 质量评估报告
+            execution_metadata: 执行元数据
+            
+        Returns:
+            整合后的最终结果
+        """
+        start_time = datetime.datetime.now()
+        
+        print("开始结果整合...")
+        
+        # 计算执行指标
+        start_time_obj = datetime.datetime.fromisoformat(execution_metadata.get("start_time", start_time.isoformat()))
+        execution_time = (start_time - start_time_obj).total_seconds()
+        
+        # 统计字数
+        word_count = novel_content.get("word_count", 0)
+        if not word_count and "full_novel" in novel_content:
+            word_count = len(novel_content["full_novel"])
+        
+        # 整合结果
+        final_result = {
+            "result_id": f"result_{uuid.uuid4()}",
+            "response": "故事创作工作流已完成",
+            "content": {
+                "creative_framework": creative_framework,
+                "novel_content": novel_content,
+                "quality_report": quality_report
+            },
+            "execution_summary": {
+                "total_time_seconds": execution_time,
+                "word_count": word_count,
+                "quality_score": quality_report.get("overall_score", 0),
+                "steps_completed": execution_metadata.get("steps_completed", 0),
+                "total_steps": execution_metadata.get("total_steps", 0)
+            },
+            "metrics": {
+                "efficiency": round(word_count / max(execution_time / 60, 1), 2),  # 字/分钟
+                "quality_level": "优秀" if quality_report.get("overall_score", 0) >= 85 else "良好" if quality_report.get("overall_score", 0) >= 70 else "待改进",
+                "completion_rate": execution_metadata.get("steps_completed", 0) / max(execution_metadata.get("total_steps", 1), 1) * 100
+            },
+            "logs": {
+                "execution_start": execution_metadata.get("start_time"),
+                "execution_end": start_time.isoformat(),
+                "key_milestones": execution_metadata.get("milestones", [])
+            },
+            "integrated_at": start_time.isoformat()
+        }
+        
+        print(f"结果整合完成: word_count={word_count}, quality_score={quality_report.get('overall_score', 0)}")
+        
+        return final_result

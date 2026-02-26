@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from .models import TaskProgress
 
@@ -303,3 +303,198 @@ class ProgressStorage:
 
 # 全局存储实例
 storage = ProgressStorage()
+
+
+class ReportStorage:
+    """执行报告存储系统"""
+    
+    def __init__(self, storage_dir: str = None):
+        """
+        初始化报告存储系统
+        
+        Args:
+            storage_dir: 存储目录路径，默认为 backend/data/reports
+        """
+        # 内存存储
+        self.memory_storage: Dict[str, Any] = {}
+        
+        # 文件存储目录
+        if storage_dir is None:
+            self.storage_dir = os.path.join(os.path.dirname(__file__), "..", "data", "reports")
+        else:
+            self.storage_dir = storage_dir
+        
+        # 确保存储目录存在
+        os.makedirs(self.storage_dir, exist_ok=True)
+    
+    def _get_report_filename(self, task_id: str, step_index: int, step_name: str) -> str:
+        """
+        生成报告文件名
+        
+        Args:
+            task_id: 任务ID
+            step_index: 步骤索引
+            step_name: 步骤名称
+            
+        Returns:
+            str: 文件名
+        """
+        # 清理步骤名称，移除不安全的字符
+        safe_step_name = "".join(c for c in step_name if c.isalnum() or c in "_-").strip()
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return f"{task_id}_step{step_index:03d}_{safe_step_name}_{timestamp}.json"
+    
+    def save_step_report(self, report) -> str:
+        """
+        保存步骤执行报告
+        
+        Args:
+            report: 步骤执行报告对象 (StepExecutionReport)
+            
+        Returns:
+            str: 保存的文件路径
+        """
+        # 保存到内存
+        report_key = f"{report.task_id}_{report.step_index}"
+        self.memory_storage[report_key] = report
+        
+        # 生成文件名
+        filename = self._get_report_filename(
+            report.task_id, 
+            report.step_index, 
+            report.step_name
+        )
+        file_path = os.path.join(self.storage_dir, filename)
+        
+        # 保存到文件
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(report.to_dict(), f, ensure_ascii=False, indent=2)
+            return file_path
+        except Exception as e:
+            print(f"Error saving step report to file: {e}")
+            return ""
+    
+    def get_step_report(self, task_id: str, step_index: int) -> Optional[Any]:
+        """
+        获取步骤执行报告
+        
+        Args:
+            task_id: 任务ID
+            step_index: 步骤索引
+            
+        Returns:
+            Optional[StepExecutionReport]: 步骤执行报告对象，不存在则返回None
+        """
+        # 先从内存获取
+        report_key = f"{task_id}_{step_index}"
+        if report_key in self.memory_storage:
+            return self.memory_storage[report_key]
+        
+        # 从文件搜索
+        try:
+            for filename in os.listdir(self.storage_dir):
+                if filename.startswith(f"{task_id}_step{step_index:03d}_") and filename.endswith('.json'):
+                    file_path = os.path.join(self.storage_dir, filename)
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        return data
+        except Exception as e:
+            print(f"Error loading step report from file: {e}")
+        
+        return None
+    
+    def get_task_reports(self, task_id: str) -> List[Dict[str, Any]]:
+        """
+        获取任务的所有步骤执行报告
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            List[Dict[str, Any]]: 步骤执行报告列表，按步骤索引排序
+        """
+        reports = []
+        
+        # 从内存获取
+        for key, report in self.memory_storage.items():
+            if key.startswith(f"{task_id}_"):
+                reports.append(report.to_dict() if hasattr(report, 'to_dict') else report)
+        
+        # 从文件获取
+        try:
+            for filename in os.listdir(self.storage_dir):
+                if filename.startswith(f"{task_id}_step") and filename.endswith('.json'):
+                    # 检查是否已在内存中
+                    parts = filename.split('_')
+                    if len(parts) >= 2 and parts[1].startswith('step'):
+                        step_index = int(parts[1][4:7])  # 提取步骤索引
+                        report_key = f"{task_id}_{step_index}"
+                        if report_key not in self.memory_storage:
+                            file_path = os.path.join(self.storage_dir, filename)
+                            with open(file_path, 'r', encoding='utf-8') as f:
+                                data = json.load(f)
+                                reports.append(data)
+        except Exception as e:
+            print(f"Error loading task reports from files: {e}")
+        
+        # 按步骤索引排序
+        reports.sort(key=lambda x: x.get('step_index', 0))
+        return reports
+    
+    def delete_task_reports(self, task_id: str):
+        """
+        删除任务的所有报告
+        
+        Args:
+            task_id: 任务ID
+        """
+        # 从内存删除
+        keys_to_delete = [key for key in self.memory_storage.keys() if key.startswith(f"{task_id}_")]
+        for key in keys_to_delete:
+            del self.memory_storage[key]
+        
+        # 从文件删除
+        try:
+            for filename in os.listdir(self.storage_dir):
+                if filename.startswith(f"{task_id}_") and filename.endswith('.json'):
+                    file_path = os.path.join(self.storage_dir, filename)
+                    try:
+                        os.remove(file_path)
+                    except Exception as e:
+                        print(f"Error deleting report file {filename}: {e}")
+        except Exception as e:
+            print(f"Error deleting task reports: {e}")
+    
+    def clear_memory(self):
+        """清空内存存储"""
+        self.memory_storage.clear()
+    
+    def get_storage_stats(self) -> Dict[str, int]:
+        """
+        获取存储统计信息
+        
+        Returns:
+            Dict[str, int]: 统计信息
+        """
+        # 内存存储统计
+        memory_count = len(self.memory_storage)
+        
+        # 文件存储统计
+        file_count = 0
+        try:
+            for filename in os.listdir(self.storage_dir):
+                if filename.endswith('.json'):
+                    file_count += 1
+        except Exception:
+            pass
+        
+        return {
+            "memory_count": memory_count,
+            "file_count": file_count,
+            "total_count": memory_count + file_count
+        }
+
+
+# 全局报告存储实例
+report_storage = ReportStorage()
